@@ -15,8 +15,10 @@ import AppKit
 @MainActor
 final class Updater: ObservableObject {
     static let shared = Updater()
-    static let repo = "AhmadMahi/nexus-face"
-    private static let tagPrefix = "app-v"
+    static let repo = "AhmadMahi/rafiq-app"
+    // mac-v here, win-v for the other one, so neither can ever be
+    // handed the wrong build.
+    private static let tagPrefix = "mac-v"
 
     enum Phase: Equatable {
         case idle, checking, none, found(String), downloading, installing, failed(String)

@@ -19,7 +19,7 @@ namespace Rafiq.Core;
 /// </summary>
 public sealed class Updater
 {
-    public const string Repo = "AhmadMahi/nexus-face";
+    public const string Repo = "AhmadMahi/rafiq-app";
     const string TagPrefix = "win-v";
 
     public enum State { Idle, Checking, UpToDate, Found, Downloading, Installing, Failed }
