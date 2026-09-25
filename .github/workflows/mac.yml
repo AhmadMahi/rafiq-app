@@ -1,0 +1,50 @@
+name: Build and release Rafiq for macOS
+
+on:
+  push:
+    tags: [ 'mac-v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # Built with the Command Line Tools alone, the same way it is built
+      # by hand, so the runner cannot quietly produce something different.
+      - name: Build
+        working-directory: mac
+        run: ./build.sh
+
+      - name: Check the tag matches the version
+        if: startsWith(github.ref, 'refs/tags/mac-v')
+        run: |
+          VER=$(grep -oE '^VER="[^"]+"' mac/build.sh | cut -d'"' -f2)
+          TAG="${GITHUB_REF_NAME#mac-v}"
+          echo "build.sh=$VER tag=$TAG"
+          [ "$VER" = "$TAG" ] || { echo "::error::VER ($VER) != tag ($TAG)"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rafiq-macos
+          path: mac/build/*.dmg
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/mac-v')
+        with:
+          files: mac/build/*.dmg
+          name: Rafiq ${{ github.ref_name }} for macOS
+          body: |
+            The menu bar companion for the robot.
+
+            Mount the image, drag Rafiq to Applications, and **right-click
+            then Open** the first time. It is ad hoc signed rather than
+            notarised, so a plain double click is blocked once.
+
+            Rafiq updates itself after that: Settings, then Check.
+
+            Needs macOS 14 or newer, Apple silicon.
