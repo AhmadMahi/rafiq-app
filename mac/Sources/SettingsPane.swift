@@ -53,6 +53,7 @@ struct SettingsPane: View {
     @EnvironmentObject var dev: Device
     @EnvironmentObject var svc: Services
     @ObservedObject private var up = Updater.shared
+    @Binding var showing: Bool
 
     @State private var addr = ""
     @State private var robotUpdate = ""
@@ -62,6 +63,20 @@ struct SettingsPane: View {
     var body: some View {
         Group {
             VStack(alignment: .leading, spacing: 12) {
+
+                // The same way back the robot's settings have. Without it
+                // the only way out was the gear you came in by, which is
+                // not where anyone looks.
+                HStack(spacing: 6) {
+                    Button { showing = false } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    Text("Settings").font(.system(size: 12, weight: .semibold))
+                    Spacer()
+                }
 
                 Group2(title: "The robot") {
                     Row(title: "Address", note: "SYSTEM on the robot shows it") {

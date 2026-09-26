@@ -122,7 +122,7 @@ struct Panel: View {
         if dev.ip.isEmpty {
             FirstRun()
         } else if showSettings {
-            scrolling { SettingsPane() }
+            scrolling { SettingsPane(showing: $showSettings) }
         } else if showRobot {
             scrolling { RobotSettings(showing: $showRobot) }
         } else if dev.pairing {
