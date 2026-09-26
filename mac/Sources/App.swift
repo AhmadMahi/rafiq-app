@@ -1,43 +1,67 @@
 import SwiftUI
 import AppKit
+import Combine
 
 /// Starts the background work the moment the app launches rather than the
 /// moment the panel is first opened. Without this the menu bar icon has
 /// nothing to report until you click it, which is backwards for an icon
 /// whose whole job is to be glanced at.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var watch: AnyCancellable?
+
     func applicationDidFinishLaunching(_ n: Notification) {
-        MainActor.assumeIsolated { Services.shared.start() }
+        MainActor.assumeIsolated {
+            if CommandLine.arguments.contains("--panel-sizes") {
+                Bar.shared.install()
+                // After launch finishes, not during it: SwiftUI does not
+                // lay anything out until the app is actually running, so
+                // measuring from inside this call measures nothing.
+                DispatchQueue.main.async { MainActor.assumeIsolated { PanelSizeCheck.run() } }
+                return
+            }
+            if CommandLine.arguments.contains("--panel-key") {
+                Bar.shared.install()
+                DispatchQueue.main.async { MainActor.assumeIsolated { PanelSizeCheck.keyCheck() } }
+                return
+            }
+            if CommandLine.arguments.contains("--panel-shot") {
+                Bar.shared.install()
+                DispatchQueue.main.async { MainActor.assumeIsolated { PanelSizeCheck.shoot() } }
+                return
+            }
+            Services.shared.start()
+            Bar.shared.install()
+            // The icon is the whole point of a menu bar app, so it reports
+            // before anything is clicked. Red means it answered before and
+            // has stopped; until the first reply there is nothing to report,
+            // so it stays grey rather than claiming a fault that has not
+            // happened.
+            let dev = Device.shared
+            let show = {
+                MainActor.assumeIsolated {
+                    if dev.ip.isEmpty { Bar.shared.face(.unset); return }
+                    switch dev.reachable {
+                    case .some(true):  Bar.shared.face(.linked)
+                    case .some(false): Bar.shared.face(.adrift)
+                    case .none:        Bar.shared.face(.unset)
+                    }
+                }
+            }
+            show()
+            watch = dev.objectWillChange.sink { _ in DispatchQueue.main.async(execute: show) }
+        }
     }
 }
 
 @main
 struct RafiqBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @ObservedObject private var dev = Device.shared
 
-    var body: some Scene {
-        MenuBarExtra {
-            Panel()
-                .environmentObject(Device.shared)
-                .environmentObject(Services.shared)
-        } label: {
-            Image(nsImage: RobotIcon.image(face))
-        }
-        .menuBarExtraStyle(.window)
-    }
-
-    /// Red means it answered before and has stopped. Until the first reply
-    /// there is nothing to report, so it stays grey rather than claiming a
-    /// fault that has not happened.
-    private var face: RobotIcon.State {
-        if dev.ip.isEmpty { return .unset }
-        switch dev.reachable {
-        case .some(true):  return .linked
-        case .some(false): return .adrift
-        case .none:        return .unset
-        }
-    }
+    // No scene of its own. The menu bar item and the window under it are
+    // built by hand in Bar.swift, because MenuBarExtra's window would not
+    // give its height back when a tall page was replaced by a short one,
+    // which is every white band in every screenshot of this app.
+    var body: some Scene { Settings { EmptyView() } }
 }
 
 struct Panel: View {
@@ -54,7 +78,12 @@ struct Panel: View {
     @FocusState private var typing: Bool
     @Environment(\.colorScheme) private var systemScheme
 
-    enum Page { case grid, settings, robot, pair, focus, breakNow, remind, phrases }
+    enum Page: String { case grid, settings, robot, pair, focus, breakNow, remind, phrases }
+
+    /// One way in for "show this page", used by the window when it opens
+    /// so every open starts on the grid, and by the size check so it can
+    /// walk the pages and watch the window follow.
+    static let goTo = Notification.Name("rafiq.page")
 
     private func closeOthers(except keep: Page) {
         if keep != .settings { showSettings = false }
@@ -82,12 +111,11 @@ struct Panel: View {
         .frame(width: 330)
         // Natural height, not whatever it is offered.
         .fixedSize(horizontal: false, vertical: true)
-        // No background and no corner radius here on purpose. The menu
-        // bar window already draws a rounded translucent panel; a second
-        // one inside it left a band of the outer one showing above and
-        // below, which is the margin that looked wrong in every
-        // screenshot. This is the fix I made once and then talked myself
-        // out of. The window's own background is what shows through.
+        // The one background in the app, drawn by the only thing that
+        // knows how big the content is. The window behind it is clear and
+        // is set to exactly this size, so there is no second panel to
+        // show through at the top and bottom.
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .animation(.easeOut(duration: 0.16), value: showSettings)
         .animation(.easeOut(duration: 0.16), value: showRobot)
         .animation(.easeOut(duration: 0.16), value: showFocus)
@@ -102,28 +130,74 @@ struct Panel: View {
         // needs to advertise that it could be.
         .focusEffectDisabled()
         .onAppear {
-            // Whatever page you were on last time, it opens on the grid.
             closeOthers(except: .grid)
             Task { await dev.refresh() }
+        }
+        // The window is built once and kept, so onAppear fires once. This
+        // is what makes every open start on the grid, and it is the same
+        // door the size check knocks on.
+        .onReceive(NotificationCenter.default.publisher(for: Panel.goTo)) { n in
+            guard let name = n.object as? String,
+                  let page = Page(rawValue: name) else { return }
+            closeOthers(except: page)
+            switch page {
+            case .settings: showSettings = true
+            case .robot:    showRobot = true
+            case .focus:    showFocus = true
+            case .breakNow: showBreak = true
+            case .remind:   showRemind = true
+            case .phrases:  showPhrases = true
+            case .grid, .pair: break
+            }
         }
     }
 
     /// Anything that can outgrow the panel scrolls inside it, with the
     /// bar given a gutter of its own so it stops sitting on the content.
+    ///
+    /// This was `ViewThatFits(in: .vertical)`, which asks how much height
+    /// is going spare before deciding what to show. In a window that is
+    /// sized by what it shows, that question has no answer: the choice
+    /// sets the height and the height drives the choice, and SwiftUI
+    /// resizes the window in a ring until the stack runs out. It crashed
+    /// on the way into settings, every time.
+    ///
+    /// A scroll view offers its content as much height as it likes, so
+    /// measuring in there does not depend on the frame we then set. The
+    /// content is measured once and the frame is the smaller of that and
+    /// the cap. Short pages come out short, tall ones scroll, and nothing
+    /// asks a question whose answer it is.
     private func scrolling<V: View>(@ViewBuilder _ v: @escaping () -> V) -> some View {
-        // A scroll view takes every inch it is offered, so capping it at
-        // 440 left short pages padded out with slack. This gives the
-        // plain view first and only falls back to scrolling when the
-        // content genuinely will not fit.
-        // Capped first, so a page taller than the cap is offered the
-        // scrolling version rather than being allowed to grow the window
-        // to its full height. Short pages still come out short.
-        ViewThatFits(in: .vertical) {
-            v()
-            ScrollView(.vertical) { v().padding(.trailing, 10) }
-                .scrollIndicators(.visible)
+        Scrolled(cap: 420) { v() }
+    }
+
+    private struct Scrolled<V: View>: View {
+        let cap: CGFloat
+        @ViewBuilder let content: () -> V
+        @State private var tall: CGFloat = 0
+
+        private struct H: PreferenceKey {
+            static var defaultValue: CGFloat { 0 }
+            static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+                value = max(value, nextValue())
+            }
         }
-        .frame(maxHeight: 420)
+
+        var body: some View {
+            ScrollView(.vertical) {
+                content()
+                    .padding(.trailing, tall > cap ? 10 : 0)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: H.self, value: g.size.height)
+                    })
+            }
+            .scrollIndicators(tall > cap ? .visible : .hidden)
+            .scrollDisabled(tall <= cap)
+            .frame(height: tall > 0 ? min(tall, cap) : cap)
+            .onPreferenceChange(H.self) { h in
+                if abs(h - tall) > 0.5 { tall = h }
+            }
+        }
     }
 
     @ViewBuilder
@@ -183,10 +257,13 @@ struct Panel: View {
             }
             Spacer()
             Button { showSettings.toggle(); closeOthers(except: .settings) } label: {
-                Image(systemName: "gearshape")
+                // Filled when you are in settings, hollow when you are
+                // not. It said the same thing in blue before, and blue on
+                // this gear has been asked about once too often to keep
+                // arguing that this particular one is the good kind.
+                Image(systemName: showSettings ? "gearshape.fill" : "gearshape")
                     .font(.system(size: 12))
-                    .foregroundStyle(showSettings ? AnyShapeStyle(Color.accentColor)
-                                                  : AnyShapeStyle(Color.secondary))
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .focusable(false)
