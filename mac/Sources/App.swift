@@ -24,6 +24,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async { MainActor.assumeIsolated { PanelSizeCheck.keyCheck() } }
                 return
             }
+            if CommandLine.arguments.contains("--panel-click") {
+                Bar.shared.install()
+                DispatchQueue.main.async { MainActor.assumeIsolated { PanelSizeCheck.clickCheck() } }
+                return
+            }
             if CommandLine.arguments.contains("--panel-shot") {
                 Bar.shared.install()
                 DispatchQueue.main.async { MainActor.assumeIsolated { PanelSizeCheck.shoot() } }

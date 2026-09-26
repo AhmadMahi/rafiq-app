@@ -29,6 +29,7 @@ final class Bar: NSObject, NSWindowDelegate {
     private var fitting = false          // fit() is not allowed to call itself
     private var fitQueued = false
     private var lastFit: NSSize = .zero
+    private var openedAt = Date.distantPast
 
     /// A panel rather than a window: it can float over other apps without
     /// taking the foreground away from them, and it can still take a key
@@ -102,6 +103,23 @@ final class Bar: NSObject, NSWindowDelegate {
     var isKey: Bool { panel?.isKeyWindow ?? false }
     var canBecomeKey: Bool { panel?.canBecomeKey ?? false }
 
+    /// Presses the menu bar button the way a click does, so the path from
+    /// the icon to the window can be tested instead of guessed at.
+    /// The two things a real click does that performClick does not: it
+    /// moves the key window about, and it is a mouse event the global
+    /// monitor may see. Neither happens in a synthetic press, which is
+    /// exactly why the synthetic press passed while the real one did
+    /// nothing at all.
+    func pokeResignKey() { windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification)) }
+
+    func pressTheIcon() -> String {
+        guard let b = item?.button else { return "no button" }
+        var why = "target \(b.target == nil ? "nil" : "set")  action \(b.action.map(String.init(describing:)) ?? "nil")"
+        b.performClick(nil)
+        why += "  -> visible \(isOpen)  height \(Int(windowHeight))"
+        return why
+    }
+
     @objc private func toggle() { isOpen ? close() : open() }
 
     func open() {
@@ -126,10 +144,12 @@ final class Bar: NSObject, NSWindowDelegate {
                 p.makeKey()
             }
         }
-        // A click anywhere else puts it away, the way a menu does.
+        openedAt = Date()
+        // A click anywhere else puts it away, the way a menu does. This is
+        // the only thing that closes it now: see windowDidResignKey.
         outside = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            MainActor.assumeIsolated { self?.close() }
+            matching: [.leftMouseDown, .rightMouseDown]) { [weak self] e in
+            MainActor.assumeIsolated { self?.clickedAway(at: e.locationInWindow) }
         }
     }
 
@@ -138,11 +158,25 @@ final class Bar: NSObject, NSWindowDelegate {
         if let o = outside { NSEvent.removeMonitor(o); outside = nil }
     }
 
-    func windowDidResignKey(_ n: Notification) {
-        // Only when the click really went elsewhere. A menu opening inside
-        // the panel takes key too, and closing on that would make every
-        // popup in here a way of dismissing the window.
-        guard NSApp.keyWindow !== panel else { return }
+    /// Deliberately does nothing.
+    ///
+    /// Closing here is what made the icon look dead. Clicking a status
+    /// item hands the key window to the status bar, so the panel lost key
+    /// during the very click that opened it and shut again inside the
+    /// same frame: it opened and closed faster than anything could be
+    /// seen, and the icon appeared to do nothing at all. Menus and
+    /// pickers inside the panel take key for the same reason, so closing
+    /// on this would also make every dropdown a way of dismissing the
+    /// window. A click somewhere else is the honest signal, and that is
+    /// what clickedAway handles.
+    func windowDidResignKey(_ n: Notification) { }
+
+    /// A click that landed outside this app. Closes, unless it is the
+    /// click that just opened it or one inside our own frame.
+    func clickedAway(at _: NSPoint) {
+        guard isOpen else { return }
+        // The press that opened the panel can still arrive here.
+        if Date().timeIntervalSince(openedAt) < 0.4 { return }
         close()
     }
 

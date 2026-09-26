@@ -114,6 +114,47 @@ enum PanelSizeCheck {
         exit(Bar.shared.isKey || !NSApp.isActive ? 0 : 1)
     }
 
+    /// The one path that matters and the one nothing was testing: icon
+    /// to window. Everything else measured a window that had been opened
+    /// by hand, which is not how anybody opens it.
+    static func clickCheck() {
+        var fail = false
+        var out = "before: visible \(Bar.shared.isOpen)\n"
+        out += "press 1: " + Bar.shared.pressTheIcon() + "\n"
+        for _ in 0..<60 { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        out += "settled: visible \(Bar.shared.isOpen)  height \(Int(Bar.shared.windowHeight))\n"
+        Bar.shared.pokeResignKey()
+        for _ in 0..<20 { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        out += "after losing key: visible \(Bar.shared.isOpen)"
+            + (Bar.shared.isOpen ? "  (stays open, which is the fix)\n" : "  <-- it shut itself\n")
+        if !Bar.shared.isOpen { fail = true; Bar.shared.open()
+            for _ in 0..<30 { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) } }
+        // The press that opened it can still land here. Reopen and ask
+        // straight away, with no waiting, which is the real ordering.
+        Bar.shared.close(); Bar.shared.open()
+        Bar.shared.clickedAway(at: .zero)
+        out += "its own opening click: visible \(Bar.shared.isOpen)"
+            + (Bar.shared.isOpen ? "  (ignored, good)\n" : "  <-- closed on its own opening click\n")
+        if !Bar.shared.isOpen { fail = true; Bar.shared.open() }
+        // and a click away once it has settled does close it
+        for _ in 0..<70 { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        Bar.shared.clickedAway(at: .zero)
+        out += "a click away, settled: visible \(Bar.shared.isOpen)"
+            + (Bar.shared.isOpen ? "  <-- it should have closed\n" : "  (closed, good)\n")
+        if Bar.shared.isOpen { fail = true }
+        Bar.shared.open()
+        for _ in 0..<30 { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        out += "press 2: " + Bar.shared.pressTheIcon() + "\n"
+        for _ in 0..<60 { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        out += "settled: visible \(Bar.shared.isOpen)\n"
+        out += "press 3: " + Bar.shared.pressTheIcon() + "\n"
+        for _ in 0..<60 { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        out += "settled: visible \(Bar.shared.isOpen)  height \(Int(Bar.shared.windowHeight))\n"
+        out += fail ? "\nFAIL\n" : "\nPASS: the icon opens it, and only a real click away shuts it\n"
+        try? out.write(toFile: "/tmp/rafiq_click.txt", atomically: true, encoding: .utf8)
+        exit(fail ? 1 : 0)
+    }
+
     static func shoot() {
         setvbuf(stdout, nil, _IOLBF, 0)
         Bar.shared.open()
