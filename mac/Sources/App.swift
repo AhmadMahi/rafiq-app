@@ -50,6 +50,7 @@ struct Panel: View {
     @State private var showBreak = false
     @State private var showRemind = false
     @State private var showPhrases = false
+    @State private var showRobot = false
     @FocusState private var typing: Bool
     @Environment(\.colorScheme) private var systemScheme
 
@@ -57,8 +58,10 @@ struct Panel: View {
         VStack(alignment: .leading, spacing: 11) {
             header
 
-            if dev.ip.isEmpty || showSettings {
-                Settings(showing: $showSettings).environmentObject(dev)
+            if dev.ip.isEmpty {
+                FirstRun()
+            } else if showRobot {
+                RobotSettings(showing: $showRobot).environmentObject(dev)
             } else if dev.pairing {
                 PairView().environmentObject(dev)
             } else if showFocus {
@@ -104,13 +107,21 @@ struct Panel: View {
         .animation(.easeOut(duration: 0.18), value: showBreak)
         .animation(.easeOut(duration: 0.18), value: showRemind)
         .animation(.easeOut(duration: 0.18), value: showPhrases)
+        .animation(.easeOut(duration: 0.18), value: showRobot)
         // Both, deliberately. preferredColorScheme is a window level hint
         // and does not reliably reach a menu bar window; the environment
         // override is what actually decides how the colours resolve.
         .preferredColorScheme(dev.colorScheme)
         .environment(\.colorScheme, dev.colorScheme ?? systemScheme)
         .animation(.easeOut(duration: 0.18), value: dev.pairing)
-        .onAppear { Task { await dev.refresh() } }
+        .onAppear {
+            // Whatever page you were on last time, the panel opens on the
+            // grid. Coming back to a settings pane you had forgotten you
+            // left open is a small thing that feels broken every time.
+            showRobot = false; showFocus = false; showBreak = false
+            showRemind = false; showPhrases = false
+            Task { await dev.refresh() }
+        }
     }
 
     // ---------------------------------------------------------------
@@ -131,9 +142,10 @@ struct Panel: View {
                     .foregroundStyle(Color.accentColor)
             }
             Spacer()
-            Button { showSettings.toggle(); showFocus = false } label: {
+            Button { SettingsWindow.shared.show() } label: {
                 Image(systemName: "gearshape").font(.system(size: 11))
             }
+            .help("Rafiq settings")
             .buttonStyle(.plain).foregroundStyle(.secondary)
             Button { NSApp.terminate(nil) } label: {
                 Image(systemName: "power").font(.system(size: 11))
@@ -233,10 +245,8 @@ struct Panel: View {
                  enabled: dev.blocked(.deepSleep) == nil) {
                 Task { await dev.deepSleep() }
             }
-            // Wired up and tested, but deliberately inert for now.
-            Tile(icon: "paintbrush.pointed", name: "Draw", detail: "not yet",
-                 enabled: false) {
-                Task { await dev.canvas(TestCard.bytes(), seconds: 10) }
+            Tile(icon: "slider.horizontal.3", name: "Settings", detail: "the robot") {
+                showRobot = true
             }
         }
     }
@@ -253,21 +263,17 @@ struct Panel: View {
 
 // ===================================================================
 
-struct Settings: View {
+/// Nothing is set up yet, so there is one thing to do and this says so
+/// rather than opening a window full of things that cannot be used.
+struct FirstRun: View {
     @EnvironmentObject var dev: Device
-    @ObservedObject var up = Updater.shared
-    @Binding var showing: Bool
     @State private var addr = ""
-    @State private var customOn = false
-
-    private let breakChoices = [5, 10, 20, 30, 45, 60, 90]
 
     var body: some View {
-        ScrollView {
-          VStack(alignment: .leading, spacing: 10) {
-            Text("Settings").font(.system(size: 12, weight: .semibold))
-
-            Text("Address").font(.system(size: 10)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Where is the robot?").font(.system(size: 12, weight: .semibold))
+            Text("Its SYSTEM screen shows the address.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
             HStack(spacing: 7) {
                 TextField("192.168.1.42", text: $addr)
                     .textFieldStyle(.plain)
@@ -278,156 +284,11 @@ struct Settings: View {
                     .onSubmit(save)
                 Button("Save", action: save).font(.system(size: 11))
             }
-            Text("On the robot: SYSTEM shows it.")
-                .font(.system(size: 9)).foregroundStyle(.secondary)
-
-            Divider()
-
-            HStack {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Paired").font(.system(size: 11))
-                    Text(dev.paired ? "Only this Mac can drive it"
-                                    : "Anyone on your network can drive it")
-                        .font(.system(size: 9)).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if dev.paired {
-                    Button("Forget") { Task { await dev.unpair() } }.font(.system(size: 11))
-                } else {
-                    Button("Pair") { showing = false; Task { await dev.requestCode() } }
-                        .font(.system(size: 11))
-                }
-            }
-
-            // ---- breaks ----
-            HStack {
-                Text("Break every").font(.system(size: 11))
-                Spacer()
-                Picker("", selection: Binding(
-                    get: { customOn || !breakChoices.contains(dev.breakMins) ? -1 : dev.breakMins },
-                    set: { v in
-                        if v == -1 { customOn = true; dev.breakMins = max(5, dev.breakCustom) }
-                        else { customOn = false; dev.breakMins = v }
-                    })) {
-                    ForEach(breakChoices, id: \.self) { Text("\($0) min").tag($0) }
-                    Text("Custom").tag(-1)
-                }
-                .labelsHidden().frame(width: 104)
-            }
-            if customOn || !breakChoices.contains(dev.breakMins) {
-                HStack(spacing: 7) {
-                    Stepper(value: Binding(get: { max(5, dev.breakMins) },
-                                           set: { dev.breakMins = max(5, min(90, $0));
-                                                  dev.breakCustom = dev.breakMins }),
-                            in: 5...90, step: 5) {
-                        Text("\(max(5, dev.breakMins)) minutes")
-                            .font(.system(size: 11, design: .monospaced))
-                    }
-                    .controlSize(.mini)
-                }
-                Text("Five minutes is the shortest, ninety the longest.")
-                    .font(.system(size: 9)).foregroundStyle(.secondary)
-            }
-
-            // ---- locking ----
-            Toggle(isOn: Binding(get: { dev.lockWhenIdle }, set: { dev.lockWhenIdle = $0 })) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Lock when I walk away").font(.system(size: 11))
-                    Text("After \(dev.lockIdleMins) minutes with no keyboard or mouse")
-                        .font(.system(size: 9)).foregroundStyle(.secondary)
-                }
-            }
-            .toggleStyle(.switch).controlSize(.mini)
-            if dev.lockWhenIdle {
-                Picker("", selection: Binding(get: { dev.lockIdleMins },
-                                              set: { dev.lockIdleMins = $0 })) {
-                    ForEach([2, 5, 10, 15, 30], id: \.self) { Text("\($0) min").tag($0) }
-                }
-                .labelsHidden().frame(width: 104)
-            }
-
-            Toggle(isOn: Binding(get: { dev.watchClipboard },
-                                 set: { dev.watchClipboard = $0 })) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Send what I copy").font(.system(size: 11))
-                    Text("Skips anything a password manager marks")
-                        .font(.system(size: 9)).foregroundStyle(.secondary)
-                }
-            }
-            .toggleStyle(.switch).controlSize(.mini)
-
-            // ---- quick phrases ----
-            Text("Quick phrases, one per line")
-                .font(.system(size: 10)).foregroundStyle(.secondary)
-            TextEditor(text: Binding(get: { dev.phrasesRaw }, set: { dev.phrasesRaw = $0 }))
-                .font(.system(size: 11))
-                .frame(height: 62)
-                .scrollContentBackground(.hidden)
-                .padding(5)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color.primary.opacity(0.07)))
-
-            // ---- appearance ----
-            HStack {
-                Text("Appearance").font(.system(size: 11))
-                Spacer()
-                Picker("", selection: Binding(get: { dev.theme }, set: { dev.theme = $0 })) {
-                    Text("System").tag("system")
-                    Text("Light").tag("light")
-                    Text("Dark").tag("dark")
-                }
-                .labelsHidden().frame(width: 104)
-            }
-
-            Divider()
-
-            // ---- updating Rafiq itself ----
-            HStack {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Rafiq \(up.current)").font(.system(size: 11))
-                    Text(updateNote).font(.system(size: 9)).foregroundStyle(.secondary)
-                }
-                Spacer()
-                switch up.phase {
-                case .checking, .downloading, .installing:
-                    ProgressView().controlSize(.small)
-                case .found:
-                    Button("Install") { Task { await up.check(andInstall: true) } }
-                        .font(.system(size: 11))
-                default:
-                    Button("Check") { Task { await up.check(andInstall: false) } }
-                        .font(.system(size: 11))
-                }
-            }
-
-            HStack {
-                Text(dev.version.isEmpty ? "" : "robot \(dev.version)")
-                    .font(.system(size: 9)).foregroundStyle(.secondary)
-                Spacer()
-                Button("Done") { showing = false }.font(.system(size: 11))
-            }
-          }
-        }
-        .frame(maxHeight: 440)
-        .onAppear { addr = dev.ip; customOn = !breakChoices.contains(dev.breakMins) }
-    }
-
-    private var updateNote: String {
-        switch up.phase {
-        case .idle:        return "Check for a newer version"
-        case .checking:    return "Looking..."
-        case .none:        return "You are up to date"
-        case .found(let v): return "Version \(v) is available"
-        case .downloading: return "Downloading..."
-        case .installing:  return "Installing, it will restart"
-        case .failed(let m): return m
         }
     }
-
     private func save() {
         dev.ip = addr.trimmingCharacters(in: .whitespaces)
         Task { await dev.refresh() }
-        if !dev.ip.isEmpty { showing = false }
     }
 }
 

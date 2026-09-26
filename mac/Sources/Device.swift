@@ -49,6 +49,28 @@ final class Device: ObservableObject {
     @Published var focusLeft = 0
     @Published var dndLeft = 0
     @Published var version = ""
+    @Published var nets: [(ssid: String, on: Bool)] = []
+    @Published var netMax = 5
+    @Published var intWired = false
+    @Published var deepOff = false
+    @Published var bri = 160
+    @Published var face = 0
+    @Published var slpi = 1
+    @Published var popi = 2
+    @Published var eye = 0
+    @Published var tap = 2
+    @Published var autoTurn = false
+
+    // The choices the robot itself offers, kept here so the app and the
+    // panel can never disagree about what they mean.
+    static let brightNames = ["dim", "25%", "50%", "75%", "100%"]
+    static let brightVals  = [0, 64, 128, 191, 255]
+    static let faceNames   = ["classic", "stacked", "date up", "minimal", "side",
+                              "banner", "drift", "parallax", "water", "sand"]
+    static let sleepNames  = ["15s", "30s", "45s", "1m", "2m", "3m", "5m", "10m", "never"]
+    static let popupNames  = ["off", "5s", "10s", "20s", "30s", "60s"]
+    static let eyeNames    = ["round", "square", "wide", "sleepy", "joy", "cyclops"]
+    static let tapNames    = ["ultra light", "light", "medium", "hard"]
 
     /// Set while a six digit code is on the robot's panel.
     @Published var pairing = false
@@ -166,6 +188,51 @@ final class Device: ObservableObject {
         await toast(text, kind: "remind", seconds: 25)
     }
 
+    // ---------------------------------------------------------------
+    //  the robot's own settings
+    // ---------------------------------------------------------------
+
+    func setBrightness(_ i: Int) async { await run("/api/cfgv", ["k": "bri", "v": String(i)], say: nil) }
+    func setFace(_ i: Int)       async { await run("/api/cfgv", ["k": "face", "v": String(i)], say: nil) }
+    func setSleep(_ i: Int)      async { await run("/api/cfgv", ["k": "slpi", "v": String(i)], say: nil) }
+    func setEyes(_ i: Int)       async { await run("/api/cfgv", ["k": "eye", "v": String(i)], say: nil) }
+    func setPopup(_ i: Int)      async { await run("/api/cfgv", ["k": "popi", "v": String(i)], say: nil) }
+    func setTurn(_ auto: Bool)   async { await run("/api/turn", ["a": auto ? "1" : "0"], say: nil) }
+    func setTap(_ i: Int)        async { await run("/api/tap", ["n": String(i)], say: "Tap strength set") }
+    func setDeepSleep(_ on: Bool) async {
+        await run("/api/deep", ["off": on ? "0" : "1"], say: nil)
+        deepOff = !on
+    }
+    func reboot() async { await run("/api/reboot", [:], say: "Rebooting") }
+
+    // ---------------------------------------------------------------
+    //  networks
+    // ---------------------------------------------------------------
+    //  The password goes one way only. Nothing reads one back, here or
+    //  on the device, so this can add one and still not know the others.
+
+    func addNetwork(_ ssid: String, _ pass: String) async {
+        let s = ssid.trimmingCharacters(in: .whitespaces)
+        guard !s.isEmpty else { return }
+        await run("/api/net", ["ssid": s, "pass": pass], say: "Network saved")
+        await refresh()
+    }
+    func removeNetwork(_ i: Int) async {
+        await run("/api/net", ["del": String(i)], say: nil)
+        await refresh()
+    }
+    func promoteNetwork(_ i: Int) async {
+        await run("/api/net", ["up": String(i)], say: nil)
+        await refresh()
+    }
+
+    /// Telling the robot we are going, rather than going quiet and
+    /// leaving it to wait out the timeout wondering.
+    func disconnect() async {
+        await run("/api/bye", [:], say: "Disconnected")
+        linked = false
+    }
+
     func checkUpdate() async {
         await run("/api/update", [:], say: "Looking for an update")
     }
@@ -253,6 +320,14 @@ final class Device: ObservableObject {
             focusLeft = Self.jsonInt(s, "focusLeft")
             dndLeft   = Self.jsonInt(s, "dndLeft")
             version   = Self.jsonString(s, "fw") ?? version
+            intWired  = Self.jsonBool(s, "intWired")
+            deepOff   = Self.jsonBool(s, "deepOff")
+            netMax    = max(1, Self.jsonInt(s, "netMax"))
+            bri  = Self.jsonInt(s, "bri");  face = Self.jsonInt(s, "face")
+            slpi = Self.jsonInt(s, "slpi"); popi = Self.jsonInt(s, "popi")
+            eye  = Self.jsonInt(s, "eye");  tap  = Self.jsonInt(s, "tap")
+            autoTurn = Self.jsonBool(s, "turn")
+            nets      = Self.parseNets(s)
         } catch {
             reachable = false
             linked = false
@@ -342,6 +417,19 @@ final class Device: ObservableObject {
         return out.trimmingCharacters(in: .whitespaces)
     }
     static func jsonBool(_ b: String, _ key: String) -> Bool { jsonRaw(b, key) == "true" }
+
+    /// The networks it knows, by name. There are never passwords in here.
+    static func parseNets(_ b: String) -> [(ssid: String, on: Bool)] {
+        guard let r = b.range(of: "\"nets\":[") else { return [] }
+        guard let close = b[r.upperBound...].firstIndex(of: "]") else { return [] }
+        let body = String(b[r.upperBound..<close])
+        var out: [(String, Bool)] = []
+        for piece in body.split(separator: "{") {
+            guard let name = jsonString(String(piece), "ssid"), !name.isEmpty else { continue }
+            out.append((name, jsonRaw(String(piece), "on") == "true"))
+        }
+        return out
+    }
     static func jsonInt(_ b: String, _ key: String) -> Int { Int(jsonRaw(b, key) ?? "") ?? 0 }
 }
 
