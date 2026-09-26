@@ -53,6 +53,7 @@ final class Device: ObservableObject {
     @Published var netMax = 5
     @Published var intWired = false
     @Published var deepOff = false
+    @Published var autoUp = false
     @Published var bri = 160
     @Published var face = 0
     @Published var slpi = 1
@@ -205,6 +206,18 @@ final class Device: ObservableObject {
     }
     func reboot() async { await run("/api/reboot", [:], say: "Rebooting") }
 
+    func setAutoUpdate(_ on: Bool) async {
+        await run("/api/autoup", ["a": on ? "1" : "0"], say: nil)
+        autoUp = on
+    }
+
+    /// Settings back to how they came. Networks, pairing and the shelf
+    /// are not settings and are deliberately left alone.
+    func resetSettings() async {
+        await run("/api/reset", [:], say: "Settings reset")
+        await refresh()
+    }
+
     // ---------------------------------------------------------------
     //  networks
     // ---------------------------------------------------------------
@@ -322,6 +335,7 @@ final class Device: ObservableObject {
             version   = Self.jsonString(s, "fw") ?? version
             intWired  = Self.jsonBool(s, "intWired")
             deepOff   = Self.jsonBool(s, "deepOff")
+            autoUp    = Self.jsonBool(s, "autoUp")
             netMax    = max(1, Self.jsonInt(s, "netMax"))
             bri  = Self.jsonInt(s, "bri");  face = Self.jsonInt(s, "face")
             slpi = Self.jsonInt(s, "slpi"); popi = Self.jsonInt(s, "popi")

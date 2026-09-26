@@ -10,7 +10,7 @@ struct RobotSettings: View {
     @Binding var showing: Bool
 
     @State private var page: Page? = nil
-    enum Page: Hashable { case brightness, face, sleep, tap, nets, turn, popup, eyes }
+    enum Page: Hashable { case brightness, face, sleep, tap, nets, turn, popup, eyes, more }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -45,6 +45,7 @@ struct RobotSettings: View {
         case .turn:       return "Page turn"
         case .popup:      return "Popup time"
         case .eyes:       return "Eye style"
+        case .more:       return "Updates and reset"
         }
     }
 
@@ -71,9 +72,8 @@ struct RobotSettings: View {
                  detail: Device.popupNames[safe: dev.popi] ?? "") { page = .popup }
             Tile(icon: "eyes.inverse", name: "Eye style",
                  detail: Device.eyeNames[safe: dev.eye] ?? "") { page = .eyes }
-            Tile(icon: "arrow.clockwise", name: "Reboot", detail: "the robot") {
-                Task { await dev.reboot() }
-            }
+            Tile(icon: "ellipsis.circle", name: "More",
+                 detail: dev.autoUp ? "auto update on" : "updates, reset") { page = .more }
         }
     }
 
@@ -116,6 +116,50 @@ struct RobotSettings: View {
             }
         case .nets:
             Networks()
+        case .more:
+            VStack(alignment: .leading, spacing: 9) {
+                Toggle(isOn: Binding(get: { dev.autoUp },
+                                     set: { v in Task { await dev.setAutoUpdate(v) } })) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Update itself").font(.system(size: 12))
+                        Text("Looks once a day and installs what it finds, "
+                             + "only while it is asleep and nothing is running")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch).controlSize(.small)
+
+                Divider()
+
+                Button { Task { await dev.checkUpdate() } } label: {
+                    HStack {
+                        Image(systemName: "arrow.down.circle").font(.system(size: 11))
+                        Text("Check for firmware now").font(.system(size: 12))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.primary.opacity(0.06)))
+                }
+                .buttonStyle(.plain)
+
+                Button { Task { await dev.reboot() } } label: {
+                    HStack {
+                        Image(systemName: "arrow.clockwise").font(.system(size: 11))
+                        Text("Reboot the robot").font(.system(size: 12))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.primary.opacity(0.06)))
+                }
+                .buttonStyle(.plain)
+
+                Divider()
+
+                ResetButton()
+            }
         }
     }
 
@@ -124,6 +168,42 @@ struct RobotSettings: View {
             ?? Device.brightVals.enumerated()
                 .min(by: { abs($0.element - dev.bri) < abs($1.element - dev.bri) })?.offset
             ?? 0
+    }
+}
+
+/// Resetting asks first, in place, because a settings screen is exactly
+/// where a misplaced click lands.
+struct ResetButton: View {
+    @EnvironmentObject var dev: Device
+    @State private var asking = false
+
+    var body: some View {
+        if asking {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Put every setting back the way it came?")
+                    .font(.system(size: 11))
+                Text("Networks, pairing and the reads stay.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                HStack {
+                    Button("Reset") { asking = false; Task { await dev.resetSettings() } }
+                        .font(.system(size: 11))
+                    Button("Cancel") { asking = false }.font(.system(size: 11))
+                }
+            }
+        } else {
+            Button { asking = true } label: {
+                HStack {
+                    Image(systemName: "arrow.counterclockwise").font(.system(size: 11))
+                    Text("Reset the robot's settings").font(.system(size: 12))
+                    Spacer()
+                }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.primary.opacity(0.06)))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.red)
+        }
     }
 }
 

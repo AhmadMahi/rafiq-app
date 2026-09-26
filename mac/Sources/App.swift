@@ -80,12 +80,14 @@ struct Panel: View {
         }
         .padding(11)
         .frame(width: 330)
-        // Takes its natural height rather than whatever it is offered.
-        // Without this a scroll view inside will happily swell to fill
-        // the window and leave the content floating in the middle of it.
+        // Natural height, not whatever it is offered.
         .fixedSize(horizontal: false, vertical: true)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        // No background and no corner radius here on purpose. The menu
+        // bar window already draws a rounded translucent panel; a second
+        // one inside it left a band of the outer one showing above and
+        // below, which is the margin that looked wrong in every
+        // screenshot. This is the fix I made once and then talked myself
+        // out of. The window's own background is what shows through.
         .animation(.easeOut(duration: 0.16), value: showSettings)
         .animation(.easeOut(duration: 0.16), value: showRobot)
         .animation(.easeOut(duration: 0.16), value: showFocus)
@@ -95,6 +97,10 @@ struct Panel: View {
         .animation(.easeOut(duration: 0.16), value: dev.pairing)
         .preferredColorScheme(dev.colorScheme)
         .environment(\.colorScheme, dev.colorScheme ?? systemScheme)
+        // A focus ring round the gear is what the blue box was. Nothing
+        // in a panel like this is reached by tabbing, so nothing in it
+        // needs to advertise that it could be.
+        .focusEffectDisabled()
         .onAppear {
             // Whatever page you were on last time, it opens on the grid.
             closeOthers(except: .grid)
@@ -109,12 +115,15 @@ struct Panel: View {
         // 440 left short pages padded out with slack. This gives the
         // plain view first and only falls back to scrolling when the
         // content genuinely will not fit.
+        // Capped first, so a page taller than the cap is offered the
+        // scrolling version rather than being allowed to grow the window
+        // to its full height. Short pages still come out short.
         ViewThatFits(in: .vertical) {
             v()
             ScrollView(.vertical) { v().padding(.trailing, 10) }
-                .frame(height: 440)
                 .scrollIndicators(.visible)
         }
+        .frame(maxHeight: 420)
     }
 
     @ViewBuilder
@@ -180,6 +189,7 @@ struct Panel: View {
                                                   : AnyShapeStyle(Color.secondary))
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .help("Settings")
             Button { NSApp.terminate(nil) } label: {
                 Image(systemName: "power")
@@ -187,6 +197,7 @@ struct Panel: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .help("Quit Rafiq")
         }
     }
