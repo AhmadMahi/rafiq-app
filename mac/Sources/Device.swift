@@ -66,8 +66,13 @@ final class Device: ObservableObject {
     // panel can never disagree about what they mean.
     static let brightNames = ["dim", "25%", "50%", "75%", "100%"]
     static let brightVals  = [0, 64, 128, 191, 255]
+    /// Must match FACE_NAME in the firmware, in order: the robot is
+    /// told a number, so a list that disagrees picks the wrong face
+    /// and mislabels the one that is on.
     static let faceNames   = ["classic", "stacked", "date up", "minimal", "side",
-                              "banner", "drift", "parallax", "water", "sand"]
+                              "banner", "drift", "parallax", "water", "sand",
+                              "dial", "bauhaus", "regulator", "rings", "infograph",
+                              "status", "vitals", "bars", "terminal", "binary"]
     static let sleepNames  = ["15s", "30s", "45s", "1m", "2m", "3m", "5m", "10m", "never"]
     static let popupNames  = ["off", "5s", "10s", "20s", "30s", "60s"]
     static let eyeNames    = ["round", "square", "wide", "sleepy", "joy", "cyclops"]
