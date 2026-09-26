@@ -1,72 +1,66 @@
 import SwiftUI
 import AppKit
-import Combine
 
 /// Starts the background work the moment the app launches rather than the
 /// moment the panel is first opened. Without this the menu bar icon has
 /// nothing to report until you click it, which is backwards for an icon
 /// whose whole job is to be glanced at.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var watch: AnyCancellable?
-
     func applicationDidFinishLaunching(_ n: Notification) {
         MainActor.assumeIsolated {
             if CommandLine.arguments.contains("--panel-sizes") {
-                Bar.shared.install()
-                // After launch finishes, not during it: SwiftUI does not
-                // lay anything out until the app is actually running, so
-                // measuring from inside this call measures nothing.
                 DispatchQueue.main.async { MainActor.assumeIsolated { PanelSizeCheck.run() } }
                 return
             }
-            if CommandLine.arguments.contains("--panel-key") {
-                Bar.shared.install()
-                DispatchQueue.main.async { MainActor.assumeIsolated { PanelSizeCheck.keyCheck() } }
-                return
-            }
-            if CommandLine.arguments.contains("--panel-click") {
-                Bar.shared.install()
-                DispatchQueue.main.async { MainActor.assumeIsolated { PanelSizeCheck.clickCheck() } }
-                return
-            }
             if CommandLine.arguments.contains("--panel-shot") {
-                Bar.shared.install()
                 DispatchQueue.main.async { MainActor.assumeIsolated { PanelSizeCheck.shoot() } }
                 return
             }
             Services.shared.start()
-            Bar.shared.install()
-            // The icon is the whole point of a menu bar app, so it reports
-            // before anything is clicked. Red means it answered before and
-            // has stopped; until the first reply there is nothing to report,
-            // so it stays grey rather than claiming a fault that has not
-            // happened.
-            let dev = Device.shared
-            let show = {
-                MainActor.assumeIsolated {
-                    if dev.ip.isEmpty { Bar.shared.face(.unset); return }
-                    switch dev.reachable {
-                    case .some(true):  Bar.shared.face(.linked)
-                    case .some(false): Bar.shared.face(.adrift)
-                    case .none:        Bar.shared.face(.unset)
-                    }
-                }
-            }
-            show()
-            watch = dev.objectWillChange.sink { _ in DispatchQueue.main.async(execute: show) }
         }
     }
 }
 
+/// Apple's menu bar window, not one of ours.
+///
+/// 1.5.0 replaced this with a hand built NSPanel to stop the window
+/// keeping a height it had grown to. It did stop that, and it also
+/// stopped the window appearing at all: opening it installed a monitor
+/// for clicks outside, and the click on the menu bar icon that opened it
+/// counted as one, so it shut in the same breath it opened. The app sat
+/// there running with nothing to show for it.
+///
+/// The band is solved the other way round now, and more simply. Every
+/// page is the same size, so the window is set once and never changes,
+/// and a window that never grows has nothing left over to show when it
+/// does not shrink. Pages that outgrow it scroll inside.
 @main
 struct RafiqBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @ObservedObject private var dev = Device.shared
 
-    // No scene of its own. The menu bar item and the window under it are
-    // built by hand in Bar.swift, because MenuBarExtra's window would not
-    // give its height back when a tall page was replaced by a short one,
-    // which is every white band in every screenshot of this app.
-    var body: some Scene { Settings { EmptyView() } }
+    var body: some Scene {
+        MenuBarExtra {
+            Panel()
+                .environmentObject(Device.shared)
+                .environmentObject(Services.shared)
+        } label: {
+            Image(nsImage: RobotIcon.image(face))
+        }
+        .menuBarExtraStyle(.window)
+    }
+
+    /// Red means it answered before and has stopped. Until the first reply
+    /// there is nothing to report, so it stays grey rather than claiming a
+    /// fault that has not happened.
+    private var face: RobotIcon.State {
+        if dev.ip.isEmpty { return .unset }
+        switch dev.reachable {
+        case .some(true):  return .linked
+        case .some(false): return .adrift
+        case .none:        return .unset
+        }
+    }
 }
 
 struct Panel: View {
@@ -84,6 +78,22 @@ struct Panel: View {
     @Environment(\.colorScheme) private var systemScheme
 
     enum Page: String { case grid, settings, robot, pair, focus, breakNow, remind, phrases }
+
+    /// The panel is this size on every page, always.
+    ///
+    /// The white bands were the menu bar window growing to fit settings
+    /// and then not giving the height back when a shorter page replaced
+    /// it. Rather than fight a window into shrinking, nothing asks it to:
+    /// one size, set once, never changed. Pages shorter than this have
+    /// room at the bottom, which reads as a margin because it is inside
+    /// the panel. Pages taller than this scroll.
+    static let width: CGFloat  = 330
+    static let height: CGFloat = 440
+    static let pad: CGFloat    = 11
+    /// What is left for a page once the header and the padding have had
+    /// theirs. Worked out from the numbers above rather than typed in
+    /// again, so changing the height changes this too.
+    static var pageHeight: CGFloat { height - pad * 2 - 22 - 10 }
 
     /// One way in for "show this page", used by the window when it opens
     /// so every open starts on the grid, and by the size check so it can
@@ -105,6 +115,7 @@ struct Panel: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             page
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             if !dev.status.isEmpty {
                 Text(dev.status)
                     .font(.system(size: 10))
@@ -112,22 +123,13 @@ struct Panel: View {
                     .transition(.opacity)
             }
         }
-        .padding(11)
-        .frame(width: 330)
-        // Natural height, not whatever it is offered.
-        .fixedSize(horizontal: false, vertical: true)
-        // The one background in the app, drawn by the only thing that
-        // knows how big the content is. The window behind it is clear and
-        // is set to exactly this size, so there is no second panel to
-        // show through at the top and bottom.
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .animation(.easeOut(duration: 0.16), value: showSettings)
-        .animation(.easeOut(duration: 0.16), value: showRobot)
-        .animation(.easeOut(duration: 0.16), value: showFocus)
-        .animation(.easeOut(duration: 0.16), value: showBreak)
-        .animation(.easeOut(duration: 0.16), value: showRemind)
-        .animation(.easeOut(duration: 0.16), value: showPhrases)
-        .animation(.easeOut(duration: 0.16), value: dev.pairing)
+        .padding(Panel.pad)
+        // The whole point. Fixed on both axes, the same on every page, so
+        // the window is sized once and never asked to change. No
+        // background of our own here: the menu bar window already draws
+        // one, and a second inside it is what left a band showing round
+        // the edges of the first.
+        .frame(width: Panel.width, height: Panel.height, alignment: .topLeading)
         .preferredColorScheme(dev.colorScheme)
         .environment(\.colorScheme, dev.colorScheme ?? systemScheme)
         // A focus ring round the gear is what the blue box was. Nothing
@@ -138,9 +140,8 @@ struct Panel: View {
             closeOthers(except: .grid)
             Task { await dev.refresh() }
         }
-        // The window is built once and kept, so onAppear fires once. This
-        // is what makes every open start on the grid, and it is the same
-        // door the size check knocks on.
+        // The door the size check knocks on, so it can walk the pages
+        // without a person clicking tiles.
         .onReceive(NotificationCenter.default.publisher(for: Panel.goTo)) { n in
             guard let name = n.object as? String,
                   let page = Page(rawValue: name) else { return }
@@ -157,23 +158,17 @@ struct Panel: View {
         }
     }
 
-    /// Anything that can outgrow the panel scrolls inside it, with the
-    /// bar given a gutter of its own so it stops sitting on the content.
+    /// Anything that can outgrow the panel scrolls inside it.
     ///
     /// This was `ViewThatFits(in: .vertical)`, which asks how much height
-    /// is going spare before deciding what to show. In a window that is
-    /// sized by what it shows, that question has no answer: the choice
-    /// sets the height and the height drives the choice, and SwiftUI
-    /// resizes the window in a ring until the stack runs out. It crashed
-    /// on the way into settings, every time.
-    ///
-    /// A scroll view offers its content as much height as it likes, so
-    /// measuring in there does not depend on the frame we then set. The
-    /// content is measured once and the frame is the smaller of that and
-    /// the cap. Short pages come out short, tall ones scroll, and nothing
-    /// asks a question whose answer it is.
+    /// is going spare before choosing what to show. With the panel a
+    /// fixed size that question finally has an answer, but it does not
+    /// need asking: the height is known, so a page is either shorter than
+    /// it or it scrolls. Measuring happens inside the scroll view, where
+    /// the content is offered as much height as it likes and so does not
+    /// depend on the frame we put round it.
     private func scrolling<V: View>(@ViewBuilder _ v: @escaping () -> V) -> some View {
-        Scrolled(cap: 420) { v() }
+        Scrolled(cap: Panel.pageHeight) { v() }
     }
 
     private struct Scrolled<V: View>: View {
@@ -188,17 +183,20 @@ struct Panel: View {
             }
         }
 
+        private var overflows: Bool { tall > cap + 0.5 }
+
         var body: some View {
             ScrollView(.vertical) {
                 content()
-                    .padding(.trailing, tall > cap ? 10 : 0)
+                    // A gutter for the bar, but only when there is a bar.
+                    .padding(.trailing, overflows ? 10 : 0)
                     .background(GeometryReader { g in
                         Color.clear.preference(key: H.self, value: g.size.height)
                     })
             }
-            .scrollIndicators(tall > cap ? .visible : .hidden)
-            .scrollDisabled(tall <= cap)
-            .frame(height: tall > 0 ? min(tall, cap) : cap)
+            .scrollIndicators(overflows ? .visible : .hidden)
+            .scrollDisabled(!overflows)
+            .frame(maxHeight: .infinity, alignment: .top)
             .onPreferenceChange(H.self) { h in
                 if abs(h - tall) > 0.5 { tall = h }
             }
