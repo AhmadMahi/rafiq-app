@@ -54,43 +54,23 @@ struct Panel: View {
     @FocusState private var typing: Bool
     @Environment(\.colorScheme) private var systemScheme
 
+    enum Page { case grid, settings, robot, pair, focus, breakNow, remind, phrases }
+
+    private func closeOthers(except keep: Page) {
+        if keep != .settings { showSettings = false }
+        if keep != .robot    { showRobot = false }
+        if keep != .focus    { showFocus = false }
+        if keep != .breakNow { showBreak = false }
+        if keep != .remind   { showRemind = false }
+        if keep != .phrases  { showPhrases = false }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
+        // One padding, one spacing, one width. Every page inside is the
+        // same shape, so nothing gains or loses a margin on its way in.
+        VStack(alignment: .leading, spacing: 10) {
             header
-
-            if dev.ip.isEmpty {
-                FirstRun()
-            } else if showRobot {
-                RobotSettings(showing: $showRobot).environmentObject(dev)
-            } else if dev.pairing {
-                PairView().environmentObject(dev)
-            } else if showFocus {
-                Minutes(title: "Focus for", choices: [5, 10, 15, 25, 30, 45, 60, 90],
-                        note: "The panel shows the countdown, then rests, then shows it "
-                            + "again. It will not drop off until the time is up.",
-                        showing: $showFocus) { m in
-                    Task { await dev.startFocus(m) }
-                }
-            } else if showBreak {
-                Minutes(title: "On a break for", choices: [5, 10, 15, 20, 30, 45, 60, 90],
-                        note: "The robot holds the sign and your Mac locks straight away. "
-                            + "The display comes back when the time is up.",
-                        showing: $showBreak) { m in
-                    Task {
-                        await dev.startBreak(m)
-                        try? await Task.sleep(nanoseconds: 400_000_000)
-                        Screen.lock()
-                    }
-                }
-            } else if showRemind {
-                RemindSheet(showing: $showRemind).environmentObject(dev)
-            } else if showPhrases {
-                Phrases(showing: $showPhrases).environmentObject(dev)
-            } else {
-                grid
-                compose
-            }
-
+            page
             if !dev.status.isEmpty {
                 Text(dev.status)
                     .font(.system(size: 10))
@@ -98,33 +78,84 @@ struct Panel: View {
                     .transition(.opacity)
             }
         }
-        .padding(13)
-        .frame(width: 320)
+        .padding(11)
+        .frame(width: 330)
+        // Takes its natural height rather than whatever it is offered.
+        // Without this a scroll view inside will happily swell to fill
+        // the window and leave the content floating in the middle of it.
+        .fixedSize(horizontal: false, vertical: true)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-        .animation(.easeOut(duration: 0.18), value: showSettings)
-        .animation(.easeOut(duration: 0.18), value: showFocus)
-        .animation(.easeOut(duration: 0.18), value: showBreak)
-        .animation(.easeOut(duration: 0.18), value: showRemind)
-        .animation(.easeOut(duration: 0.18), value: showPhrases)
-        .animation(.easeOut(duration: 0.18), value: showRobot)
-        // Both, deliberately. preferredColorScheme is a window level hint
-        // and does not reliably reach a menu bar window; the environment
-        // override is what actually decides how the colours resolve.
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .animation(.easeOut(duration: 0.16), value: showSettings)
+        .animation(.easeOut(duration: 0.16), value: showRobot)
+        .animation(.easeOut(duration: 0.16), value: showFocus)
+        .animation(.easeOut(duration: 0.16), value: showBreak)
+        .animation(.easeOut(duration: 0.16), value: showRemind)
+        .animation(.easeOut(duration: 0.16), value: showPhrases)
+        .animation(.easeOut(duration: 0.16), value: dev.pairing)
         .preferredColorScheme(dev.colorScheme)
         .environment(\.colorScheme, dev.colorScheme ?? systemScheme)
-        .animation(.easeOut(duration: 0.18), value: dev.pairing)
         .onAppear {
-            // Whatever page you were on last time, the panel opens on the
-            // grid. Coming back to a settings pane you had forgotten you
-            // left open is a small thing that feels broken every time.
-            showRobot = false; showFocus = false; showBreak = false
-            showRemind = false; showPhrases = false
+            // Whatever page you were on last time, it opens on the grid.
+            closeOthers(except: .grid)
             Task { await dev.refresh() }
         }
     }
 
-    // ---------------------------------------------------------------
+    /// Anything that can outgrow the panel scrolls inside it, with the
+    /// bar given a gutter of its own so it stops sitting on the content.
+    private func scrolling<V: View>(@ViewBuilder _ v: @escaping () -> V) -> some View {
+        // A scroll view takes every inch it is offered, so capping it at
+        // 440 left short pages padded out with slack. This gives the
+        // plain view first and only falls back to scrolling when the
+        // content genuinely will not fit.
+        ViewThatFits(in: .vertical) {
+            v()
+            ScrollView(.vertical) { v().padding(.trailing, 10) }
+                .frame(height: 440)
+                .scrollIndicators(.visible)
+        }
+    }
+
+    @ViewBuilder
+    private var page: some View {
+        if dev.ip.isEmpty {
+            FirstRun()
+        } else if showSettings {
+            scrolling { SettingsPane() }
+        } else if showRobot {
+            scrolling { RobotSettings(showing: $showRobot) }
+        } else if dev.pairing {
+            PairView()
+        } else if showFocus {
+            Minutes(title: "Focus for", choices: [5, 10, 15, 25, 30, 45, 60, 90],
+                    note: "The panel shows the countdown, then rests, then shows it "
+                        + "again. It will not drop off until the time is up.",
+                    showing: $showFocus) { m in
+                Task { await dev.startFocus(m) }
+            }
+        } else if showBreak {
+            Minutes(title: "On a break for", choices: [5, 10, 15, 20, 30, 45, 60, 90],
+                    note: "The robot holds the sign and your Mac locks straight away. "
+                        + "The display comes back when the time is up.",
+                    showing: $showBreak) { m in
+                Task {
+                    await dev.startBreak(m)
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    Screen.lock()
+                }
+            }
+        } else if showRemind {
+            scrolling { RemindSheet(showing: $showRemind) }
+        } else if showPhrases {
+            Phrases(showing: $showPhrases)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                grid
+                compose
+            }
+        }
+    }
 
     private var header: some View {
         HStack(spacing: 7) {
@@ -142,15 +173,21 @@ struct Panel: View {
                     .foregroundStyle(Color.accentColor)
             }
             Spacer()
-            Button { SettingsWindow.shared.show() } label: {
-                Image(systemName: "gearshape").font(.system(size: 11))
+            Button { showSettings.toggle(); closeOthers(except: .settings) } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 12))
+                    .foregroundStyle(showSettings ? AnyShapeStyle(Color.accentColor)
+                                                  : AnyShapeStyle(Color.secondary))
             }
-            .help("Rafiq settings")
-            .buttonStyle(.plain).foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            .help("Settings")
             Button { NSApp.terminate(nil) } label: {
-                Image(systemName: "power").font(.system(size: 11))
+                Image(systemName: "power")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain).foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            .help("Quit Rafiq")
         }
     }
 
@@ -246,7 +283,7 @@ struct Panel: View {
                 Task { await dev.deepSleep() }
             }
             Tile(icon: "slider.horizontal.3", name: "Settings", detail: "the robot") {
-                showRobot = true
+                showRobot = true; closeOthers(except: .robot)
             }
         }
     }

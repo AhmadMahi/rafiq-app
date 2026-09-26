@@ -1,45 +1,14 @@
 import SwiftUI
 import AppKit
 
-/// Rafiq's own settings, in a window of its own.
-///
-/// They were crammed into the menu bar panel, where a panel cannot be
-/// resized, the scroll bar sat on top of the content, and Done ended up
-/// beside Check as though the two were related. A real window can be
-/// moved, resized and left open beside your work, which is what settings
-/// with a text editor in them need.
-@MainActor
-final class SettingsWindow {
-    static let shared = SettingsWindow()
-    private var window: NSWindow?
-
-    func show() {
-        if let w = window {
-            w.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-        let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 560),
-            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
-            backing: .buffered, defer: false)
-        w.title = "Rafiq Settings"
-        w.titlebarAppearsTransparent = true
-        w.isReleasedWhenClosed = false
-        w.minSize = NSSize(width: 400, height: 380)
-        w.center()
-        w.contentView = NSHostingView(
-            rootView: SettingsPane()
-                .environmentObject(Device.shared)
-                .environmentObject(Services.shared))
-        window = w
-        w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    func close() { window?.close() }
-}
-
+//  Rafiq's own settings. They live in the panel, scrolling, rather than
+//  in a window of their own: a second window to manage is worse than a
+//  little scrolling, and everything here belongs with the thing that
+//  opened it.
+//
+//  Every row is the same shape, so the controls line up down one edge
+//  instead of each finding its own place, which is what made the old
+//  version look thrown together.
 /// A row with its label on the left and its control on the right, so the
 /// controls line up down the window instead of each finding its own place.
 struct Row<Content: View>: View {
@@ -56,8 +25,8 @@ struct Row<Content: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Spacer(minLength: 16)
-            content.frame(width: 170, alignment: .trailing)
+            Spacer(minLength: 10)
+            content.fixedSize(horizontal: true, vertical: false)
         }
         .padding(.vertical, 2)
     }
@@ -73,7 +42,7 @@ struct Group2<Content: View>: View {
                 .foregroundStyle(.secondary)
             content
         }
-        .padding(14)
+        .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 11, style: .continuous)
             .fill(Color.primary.opacity(0.05)))
@@ -91,8 +60,8 @@ struct SettingsPane: View {
     private let breakChoices = [5, 10, 20, 30, 45, 60, 90]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+        Group {
+            VStack(alignment: .leading, spacing: 12) {
 
                 Group2(title: "The robot") {
                     Row(title: "Address", note: "SYSTEM on the robot shows it") {
@@ -219,11 +188,8 @@ struct SettingsPane: View {
                     }
                 }
             }
-            .padding(16)
         }
-        .frame(minWidth: 400, minHeight: 380)
         .onAppear { addr = dev.ip }
-        .preferredColorScheme(dev.colorScheme)
     }
 
     private var appNote: String {
