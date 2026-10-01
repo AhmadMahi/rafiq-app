@@ -11,7 +11,7 @@ struct RobotSettings: View {
 
     @State private var page: Page? = nil
     enum Page: Hashable { case brightness, face, sleep, tap, nets, turn, popup, eyes,
-                          deep, wake, firmware, reset }
+                          battery, power, firmware, reset }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -57,13 +57,13 @@ struct RobotSettings: View {
         case .brightness: return "Brightness"
         case .face:       return "Watch face"
         case .sleep:      return "Sleep after"
-        case .tap:        return "Knocks"
+        case .tap:        return "Controls"
         case .nets:       return "Networks"
         case .turn:       return "Page turn"
         case .popup:      return "Popup time"
         case .eyes:       return "Eye style"
-        case .deep:       return "Deep sleep"
-        case .wake:       return "Wake on"
+        case .battery:    return "Battery"
+        case .power:      return "Power down"
         case .firmware:   return "Firmware"
         case .reset:      return "Reset"
         }
@@ -81,8 +81,8 @@ struct RobotSettings: View {
             Tile(icon: "moon", name: "Sleep after",
                  detail: Device.sleepNames[safe: dev.slpi] ?? "") { page = .sleep }
 
-            Tile(icon: "hand.tap", name: "Knocks",
-                 detail: dev.knock ? (Device.tapNames[safe: dev.tap] ?? "on") : "off") { page = .tap }
+            Tile(icon: "hand.tap", name: "Controls",
+                 detail: dev.knock ? "touch + knock" : "touch") { page = .tap }
             Tile(icon: "wifi", name: "Networks",
                  detail: dev.nets.isEmpty ? "none" : "\(dev.nets.count) saved") { page = .nets }
             Tile(icon: "doc.plaintext", name: "Page turn",
@@ -95,10 +95,10 @@ struct RobotSettings: View {
             // What used to be behind More. There was a grid's worth of
             // empty space under three rows and four things hidden
             // behind one tile, which is two problems that cancel.
-            Tile(icon: "zzz", name: "Deep sleep",
-                 detail: dev.deepOff ? "off" : "on") { page = .deep }
-            Tile(icon: "powersleep", name: "Wake on",
-                 detail: Device.wakeNames[safe: dev.wake] ?? "both") { page = .wake }
+            Tile(icon: "battery.100", name: "Battery",
+                 detail: dev.battPct < 0 ? "no pack" : "\(dev.battPct)%") { page = .battery }
+            Tile(icon: "powersleep", name: "Power down",
+                 detail: dev.deepOff ? "off" : (Device.deepNames[safe: dev.deepi] ?? "")) { page = .power }
             Tile(icon: "arrow.down.circle", name: "Firmware",
                  detail: dev.autoUp ? "auto" : (dev.version.isEmpty ? "check" : dev.version)) { page = .firmware }
             Tile(icon: "arrow.counterclockwise", name: "Reset",
@@ -164,6 +164,19 @@ struct RobotSettings: View {
                 .toggleStyle(.switch)
                 .controlSize(.mini)
 
+                Divider()
+
+                Toggle(isOn: Binding(get: { dev.shake },
+                                     set: { v in Task { await dev.setShake(v); await dev.refresh() } })) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Shake to go back").font(.system(size: 12))
+                        Text("One step back per shake, never past the clock")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+
                 if dev.knock {
                     Divider()
                     Choice(names: Device.tapNames, current: dev.tap) { i in
@@ -177,30 +190,48 @@ struct RobotSettings: View {
             }
         case .nets:
             Networks()
-        case .deep:
+        case .battery:
+            VStack(alignment: .leading, spacing: 9) {
+                Text(dev.battPct < 0 ? "No pack connected"
+                                     : "\(dev.battPct)%  ·  \(String(format: "%.2f", dev.battV))V")
+                    .font(.system(size: 13, weight: .medium))
+                Divider()
+                Text("Full charge").font(.system(size: 11, weight: .medium))
+                Choice(names: ["3.95V", "4.00V", "4.05V", "4.10V", "4.15V", "4.20V"],
+                       current: max(0, min(5, Int(((dev.battFull - 3.95) / 0.05).rounded())))) { i in
+                    Task { await dev.setBattFull(3.95 + Double(i) * 0.05); await dev.refresh() }
+                }
+                Text("Charge it fully, measure the pack, and pick what you measured. "
+                     + "Everything scales from it, so the top of the charge reads as "
+                     + "the top of the scale.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+        case .power:
             VStack(alignment: .leading, spacing: 9) {
                 Toggle(isOn: Binding(get: { !dev.deepOff },
                                      set: { v in Task { await dev.setDeepSleep(v); await dev.refresh() } })) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Switch off when alone").font(.system(size: 12))
-                        Text("Seven minutes with nothing connected and it powers down "
-                             + "properly. Wake on, below, says what brings it back.")
+                        Text("Only while Rafiq is not connected. With the app talking to it "
+                             + "it just darkens the screen, so it stays reachable.")
                             .font(.system(size: 10)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .toggleStyle(.switch).controlSize(.small)
-            }
 
-        case .wake:
-            VStack(alignment: .leading, spacing: 8) {
-                Choice(names: Device.wakeNames, current: dev.wake) { i in
-                    Task { await dev.setWake(i); await dev.refresh() }
+                if !dev.deepOff {
+                    Divider()
+                    Choice(names: Device.deepNames, current: dev.deepi) { i in
+                        Task { await dev.setDeepAfter(i); await dev.refresh() }
+                    }
+                    Text("Only a touch wakes it. Reminders and prayer times still bring it "
+                         + "back on their own: it works out when to return before it goes.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("What is allowed to bring it back once it has switched itself off. "
-                     + "The pad always works while it is awake; this is only about waking it.")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
         case .firmware:

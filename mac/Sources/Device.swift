@@ -60,7 +60,11 @@ final class Device: ObservableObject {
     /// there has to be a way back in that is not the pad.
     @Published var knock = false
     @Published var touches = 0
-    @Published var wake = 0
+    @Published var shake = true
+    @Published var deepi = 1
+    @Published var battFull = 4.10
+    @Published var battPct = -1        // -1 when there is no pack
+    @Published var battV = 0.0
     @Published var bri = 160
     @Published var face = 0
     @Published var slpi = 1
@@ -83,7 +87,7 @@ final class Device: ObservableObject {
     static let sleepNames  = ["15s", "30s", "45s", "1m", "2m", "3m", "5m", "10m", "never"]
     static let popupNames  = ["off", "5s", "10s", "20s", "30s", "60s"]
     /// Must match WAKE_NAME in the firmware, in order.
-    static let wakeNames   = ["both", "touch only", "movement only"]
+    static let deepNames   = ["1 min", "2 min", "5 min", "10 min", "30 min", "never"]
     static let eyeNames    = ["round", "square", "wide", "sleepy", "joy", "cyclops"]
     static let tapNames    = ["ultra light", "light", "medium", "hard"]
 
@@ -225,9 +229,31 @@ final class Device: ObservableObject {
         autoUp = on
     }
 
-    func setWake(_ i: Int) async {
-        await run("/api/cfgv", ["k": "wake", "v": String(i)], say: nil)
-        wake = i
+    func setShake(_ on: Bool) async {
+        await run("/api/cfgv", ["k": "shake", "v": on ? "1" : "0"], say: nil)
+        shake = on
+    }
+    func setDeepAfter(_ i: Int) async {
+        await run("/api/cfgv", ["k": "deepi", "v": String(i)], say: nil)
+        deepi = i
+    }
+    /// Sent in hundredths: the robot's form only carries whole numbers.
+    func setBattFull(_ v: Double) async {
+        await run("/api/cfgv", ["k": "bfull", "v": String(Int((v * 100).rounded()))], say: nil)
+        battFull = v
+    }
+
+    /// The whole list, every time. A dozen short lines is smaller than
+    /// working out what changed, and the robot needs all of them to know
+    /// when to wake itself up.
+    func pushReminders(_ list: [Reminder]) async {
+        var f: [String: String] = ["n": String(min(list.count, 12))]
+        for (i, r) in list.prefix(12).enumerated() {
+            f["t\(i)"] = String(r.text.prefix(63))
+            f["a\(i)"] = String(Int(r.fireAt.timeIntervalSince1970))
+            f["d\(i)"] = r.done ? "1" : "0"
+        }
+        await run("/api/rems", f, say: nil)
     }
 
     func setKnock(_ on: Bool) async {
@@ -361,7 +387,11 @@ final class Device: ObservableObject {
             deepOff   = Self.jsonBool(s, "deepOff")
             autoUp    = Self.jsonBool(s, "autoUp")
             knock     = Self.jsonBool(s, "knock")
-            wake      = Self.jsonInt(s, "wake")
+            shake     = Self.jsonBool(s, "shake")
+            deepi     = Self.jsonInt(s, "deepi")
+            battPct   = Self.jsonInt(s, "battPct")
+            if let bv = Self.jsonDouble(s, "battV")    { battV = bv }
+            if let bf = Self.jsonDouble(s, "battFull") { battFull = bf }
             touches   = Self.jsonInt(s, "touches")
             netMax    = max(1, Self.jsonInt(s, "netMax"))
             bri  = Self.jsonInt(s, "bri");  face = Self.jsonInt(s, "face")
@@ -472,6 +502,7 @@ final class Device: ObservableObject {
         return out
     }
     static func jsonInt(_ b: String, _ key: String) -> Int { Int(jsonRaw(b, key) ?? "") ?? 0 }
+    static func jsonDouble(_ b: String, _ key: String) -> Double? { Double(jsonRaw(b, key) ?? "") }
 }
 
 // ===================================================================

@@ -8,9 +8,12 @@ struct Reminder: Codable, Identifiable, Equatable {
     var done = false
 }
 
-/// A short list of things to be told about, held on the Mac rather than on
-/// the robot. The robot sleeps and loses track of time; the Mac does not,
-/// so it keeps the list and simply says the word when one comes due.
+/// A short list of things to be told about. Edited here, and mirrored
+/// onto the robot, which keeps its own copy and wakes itself when one
+/// comes due. That used to be this Mac's job on the grounds that the
+/// robot lost track of time while it slept. It does not: the clock runs
+/// through deep sleep. What the Mac cannot do is be open at nine in the
+/// morning, which is exactly when a reminder is wanted.
 @MainActor
 final class Reminders: ObservableObject {
     static let shared = Reminders()
@@ -87,6 +90,13 @@ final class Reminders: ObservableObject {
     private func save() {
         guard let d = try? JSONEncoder().encode(items) else { return }
         UserDefaults.standard.set(d, forKey: key)
+        // And down to the robot, which keeps its own copy from firmware
+        // 4.0.0. It has to: this Mac may be shut at nine in the morning,
+        // and the robot can only wake itself for something it knows
+        // about. The Mac still owns the editing; the robot owns the
+        // knowing when.
+        let list = pending
+        Task { await Device.shared.pushReminders(list) }
     }
     private func load() {
         guard let d = UserDefaults.standard.data(forKey: key),
