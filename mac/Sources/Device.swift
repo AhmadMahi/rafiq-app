@@ -54,6 +54,12 @@ final class Device: ObservableObject {
     @Published var intWired = false
     @Published var deepOff = false
     @Published var autoUp = false
+    /// Off on the robot by default from firmware 3.0.0, where the touch
+    /// pad took over. This is deliberately reachable from here: the pad
+    /// is the only thing driving the robot now, so if it ever stops
+    /// there has to be a way back in that is not the pad.
+    @Published var knock = false
+    @Published var touches = 0
     @Published var bri = 160
     @Published var face = 0
     @Published var slpi = 1
@@ -216,6 +222,11 @@ final class Device: ObservableObject {
         autoUp = on
     }
 
+    func setKnock(_ on: Bool) async {
+        await run("/api/cfgv", ["k": "knock", "v": on ? "1" : "0"], say: nil)
+        knock = on
+    }
+
     /// Settings back to how they came. Networks, pairing and the shelf
     /// are not settings and are deliberately left alone.
     func resetSettings() async {
@@ -341,6 +352,8 @@ final class Device: ObservableObject {
             intWired  = Self.jsonBool(s, "intWired")
             deepOff   = Self.jsonBool(s, "deepOff")
             autoUp    = Self.jsonBool(s, "autoUp")
+            knock     = Self.jsonBool(s, "knock")
+            touches   = Self.jsonInt(s, "touches")
             netMax    = max(1, Self.jsonInt(s, "netMax"))
             bri  = Self.jsonInt(s, "bri");  face = Self.jsonInt(s, "face")
             slpi = Self.jsonInt(s, "slpi"); popi = Self.jsonInt(s, "popi")

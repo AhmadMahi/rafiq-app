@@ -40,7 +40,7 @@ struct RobotSettings: View {
         case .brightness: return "Brightness"
         case .face:       return "Watch face"
         case .sleep:      return "Sleep after"
-        case .tap:        return "Tap strength"
+        case .tap:        return "Knocks"
         case .nets:       return "Networks"
         case .turn:       return "Page turn"
         case .popup:      return "Popup time"
@@ -61,8 +61,8 @@ struct RobotSettings: View {
             Tile(icon: "moon", name: "Sleep after",
                  detail: Device.sleepNames[safe: dev.slpi] ?? "") { page = .sleep }
 
-            Tile(icon: "hand.tap", name: "Tap strength",
-                 detail: Device.tapNames[safe: dev.tap] ?? "") { page = .tap }
+            Tile(icon: "hand.tap", name: "Knocks",
+                 detail: dev.knock ? (Device.tapNames[safe: dev.tap] ?? "on") : "off") { page = .tap }
             Tile(icon: "wifi", name: "Networks",
                  detail: dev.nets.isEmpty ? "none" : "\(dev.nets.count) saved") { page = .nets }
             Tile(icon: "doc.plaintext", name: "Page turn",
@@ -105,14 +105,28 @@ struct RobotSettings: View {
                 Task { await dev.setTurn(i == 1); await dev.refresh() }
             }
         case .tap:
-            VStack(alignment: .leading, spacing: 8) {
-                Choice(names: Device.tapNames, current: dev.tap) { i in
-                    Task { await dev.setTap(i); await dev.refresh() }
+            VStack(alignment: .leading, spacing: 9) {
+                Toggle(isOn: Binding(get: { dev.knock },
+                                     set: { v in Task { await dev.setKnock(v); await dev.refresh() } })) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Knocking").font(.system(size: 12))
+                        Text("The touch pad always works. This adds knocks beside it.")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
                 }
-                Text("How hard a knock has to be. Try them out on the robot itself, "
-                     + "under Settings, where it shows you what it actually heard.")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+
+                if dev.knock {
+                    Divider()
+                    Choice(names: Device.tapNames, current: dev.tap) { i in
+                        Task { await dev.setTap(i); await dev.refresh() }
+                    }
+                    Text("How hard a knock has to be. Try them out on the robot itself, "
+                         + "under Settings, where it shows you what it actually heard.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         case .nets:
             Networks()
