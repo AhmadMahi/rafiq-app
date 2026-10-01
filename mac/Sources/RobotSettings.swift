@@ -10,27 +10,44 @@ struct RobotSettings: View {
     @Binding var showing: Bool
 
     @State private var page: Page? = nil
-    enum Page: Hashable { case brightness, face, sleep, tap, nets, turn, popup, eyes, more }
+    enum Page: Hashable { case brightness, face, sleep, tap, nets, turn, popup, eyes,
+                          deep, wake, firmware, reset }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Button {
-                    if page != nil { page = nil } else { showing = false }
-                } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+            // The whole row goes back, not just the chevron. Hitting a
+            // nine pixel arrow with a mouse is a chore, and the title
+            // beside it points the same way, so it may as well mean it.
+            Button {
+                if page != nil { page = nil } else { showing = false }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text(page == nil ? "Robot settings" : title(page!))
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer()
+                    if dev.version.isEmpty == false {
+                        Text(dev.version).font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                Text(page == nil ? "Robot settings" : title(page!))
-                    .font(.system(size: 12, weight: .semibold))
-                Spacer()
-                if dev.version.isEmpty == false {
-                    Text(dev.version).font(.system(size: 10)).foregroundStyle(.secondary)
+                .contentShape(Rectangle())        // the gaps count too
+            }
+            .buttonStyle(.plain)
+
+            // Every page in here is given the same height as the grid,
+            // so choosing one does not shuffle everything up the panel
+            // and choosing another shuffle it back down. Short pages sit
+            // at the top of their space rather than floating in it.
+            Group {
+                if let p = page {
+                    detail(p)
+                } else {
+                    VStack(spacing: 10) { grid; rebootRow }
                 }
             }
-
-            if let p = page { detail(p) } else { grid }
+            .frame(maxWidth: .infinity, minHeight: 330, alignment: .topLeading)
         }
         .animation(.easeOut(duration: 0.15), value: page)
     }
@@ -45,7 +62,10 @@ struct RobotSettings: View {
         case .turn:       return "Page turn"
         case .popup:      return "Popup time"
         case .eyes:       return "Eye style"
-        case .more:       return "Updates and reset"
+        case .deep:       return "Deep sleep"
+        case .wake:       return "Wake on"
+        case .firmware:   return "Firmware"
+        case .reset:      return "Reset"
         }
     }
 
@@ -72,9 +92,36 @@ struct RobotSettings: View {
                  detail: Device.popupNames[safe: dev.popi] ?? "") { page = .popup }
             Tile(icon: "eyes.inverse", name: "Eye style",
                  detail: Device.eyeNames[safe: dev.eye] ?? "") { page = .eyes }
-            Tile(icon: "ellipsis.circle", name: "More",
-                 detail: dev.autoUp ? "auto update on" : "updates, reset") { page = .more }
+            // What used to be behind More. There was a grid's worth of
+            // empty space under three rows and four things hidden
+            // behind one tile, which is two problems that cancel.
+            Tile(icon: "zzz", name: "Deep sleep",
+                 detail: dev.deepOff ? "off" : "on") { page = .deep }
+            Tile(icon: "powersleep", name: "Wake on",
+                 detail: Device.wakeNames[safe: dev.wake] ?? "both") { page = .wake }
+            Tile(icon: "arrow.down.circle", name: "Firmware",
+                 detail: dev.autoUp ? "auto" : (dev.version.isEmpty ? "check" : dev.version)) { page = .firmware }
+            Tile(icon: "arrow.counterclockwise", name: "Reset",
+                 detail: "settings only") { page = .reset }
         }
+    }
+
+    /// Reboot sits under the grid rather than in it. It is the one
+    /// thing here that interrupts whatever the robot is doing, and a
+    /// tile among twelve identical tiles is too easy to hit by accident.
+    private var rebootRow: some View {
+        Button { Task { await dev.reboot() } } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.clockwise").font(.system(size: 10))
+                Text("Reboot the robot").font(.system(size: 11))
+                Spacer()
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.05)))
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -130,7 +177,33 @@ struct RobotSettings: View {
             }
         case .nets:
             Networks()
-        case .more:
+        case .deep:
+            VStack(alignment: .leading, spacing: 9) {
+                Toggle(isOn: Binding(get: { !dev.deepOff },
+                                     set: { v in Task { await dev.setDeepSleep(v); await dev.refresh() } })) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Switch off when alone").font(.system(size: 12))
+                        Text("Seven minutes with nothing connected and it powers down "
+                             + "properly. Wake on, below, says what brings it back.")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch).controlSize(.small)
+            }
+
+        case .wake:
+            VStack(alignment: .leading, spacing: 8) {
+                Choice(names: Device.wakeNames, current: dev.wake) { i in
+                    Task { await dev.setWake(i); await dev.refresh() }
+                }
+                Text("What is allowed to bring it back once it has switched itself off. "
+                     + "The pad always works while it is awake; this is only about waking it.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+        case .firmware:
             VStack(alignment: .leading, spacing: 9) {
                 Toggle(isOn: Binding(get: { dev.autoUp },
                                      set: { v in Task { await dev.setAutoUpdate(v) } })) {
@@ -153,26 +226,25 @@ struct RobotSettings: View {
                         Spacer()
                     }
                     .padding(.horizontal, 10).padding(.vertical, 7)
+                    .contentShape(Rectangle())
                     .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(Color.primary.opacity(0.06)))
                 }
                 .buttonStyle(.plain)
 
-                Button { Task { await dev.reboot() } } label: {
-                    HStack {
-                        Image(systemName: "arrow.clockwise").font(.system(size: 11))
-                        Text("Reboot the robot").font(.system(size: 12))
-                        Spacer()
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(Color.primary.opacity(0.06)))
+                if dev.version.isEmpty == false {
+                    Text("On \(dev.version) now.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+            }
 
-                Divider()
-
+        case .reset:
+            VStack(alignment: .leading, spacing: 9) {
                 ResetButton()
+                Text("Every setting back to how it arrived. Networks, pairing and the "
+                     + "shelf of reads are not settings and are left alone.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

@@ -60,6 +60,7 @@ final class Device: ObservableObject {
     /// there has to be a way back in that is not the pad.
     @Published var knock = false
     @Published var touches = 0
+    @Published var wake = 0
     @Published var bri = 160
     @Published var face = 0
     @Published var slpi = 1
@@ -81,6 +82,8 @@ final class Device: ObservableObject {
                               "status", "vitals", "bars", "terminal", "binary"]
     static let sleepNames  = ["15s", "30s", "45s", "1m", "2m", "3m", "5m", "10m", "never"]
     static let popupNames  = ["off", "5s", "10s", "20s", "30s", "60s"]
+    /// Must match WAKE_NAME in the firmware, in order.
+    static let wakeNames   = ["both", "touch only", "movement only"]
     static let eyeNames    = ["round", "square", "wide", "sleepy", "joy", "cyclops"]
     static let tapNames    = ["ultra light", "light", "medium", "hard"]
 
@@ -222,6 +225,11 @@ final class Device: ObservableObject {
         autoUp = on
     }
 
+    func setWake(_ i: Int) async {
+        await run("/api/cfgv", ["k": "wake", "v": String(i)], say: nil)
+        wake = i
+    }
+
     func setKnock(_ on: Bool) async {
         await run("/api/cfgv", ["k": "knock", "v": on ? "1" : "0"], say: nil)
         knock = on
@@ -353,6 +361,7 @@ final class Device: ObservableObject {
             deepOff   = Self.jsonBool(s, "deepOff")
             autoUp    = Self.jsonBool(s, "autoUp")
             knock     = Self.jsonBool(s, "knock")
+            wake      = Self.jsonInt(s, "wake")
             touches   = Self.jsonInt(s, "touches")
             netMax    = max(1, Self.jsonInt(s, "netMax"))
             bri  = Self.jsonInt(s, "bri");  face = Self.jsonInt(s, "face")

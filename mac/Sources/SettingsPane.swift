@@ -67,16 +67,17 @@ struct SettingsPane: View {
                 // The same way back the robot's settings have. Without it
                 // the only way out was the gear you came in by, which is
                 // not where anyone looks.
-                HStack(spacing: 6) {
-                    Button { showing = false } label: {
+                Button { showing = false } label: {
+                    HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.secondary)
+                        Text("Settings").font(.system(size: 12, weight: .semibold))
+                        Spacer()
                     }
-                    .buttonStyle(.plain)
-                    Text("Settings").font(.system(size: 12, weight: .semibold))
-                    Spacer()
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
 
                 Group2(title: "The robot") {
                     Row(title: "Address", note: "SYSTEM on the robot shows it") {
@@ -114,16 +115,6 @@ struct SettingsPane: View {
                                 }
                             }
                         }
-                    }
-                    Row(title: "Sleep deeply when alone",
-                        note: dev.intWired
-                            ? "Switches off after seven minutes with nothing connected"
-                            : "Needs the accelerometer's INT1 wired to GPIO4") {
-                        Toggle("", isOn: Binding(
-                            get: { !dev.deepOff },
-                            set: { v in Task { await dev.setDeepSleep(v) } }))
-                            .labelsHidden().toggleStyle(.switch).controlSize(.small)
-                            .disabled(!dev.intWired)
                     }
                 }
 
