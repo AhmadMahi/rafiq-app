@@ -478,9 +478,17 @@ extension Array {
 struct VehiclePane: View {
     @EnvironmentObject var dev: Device
     @State private var plate = ""
+    @State private var make  = ""
     @State private var model = ""
     @State private var owner = ""
     @State private var loaded = false
+
+    /// Nothing typed yet, so Save would send back what is already
+    /// there. Greying it out is how you can tell at a glance whether
+    /// what is on screen is what the robot is holding.
+    private var unchanged: Bool {
+        plate == dev.plate && make == dev.make && model == dev.model && owner == dev.owner
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -500,15 +508,24 @@ struct VehiclePane: View {
                     Task { await dev.setBikeTemplate(i); await dev.refresh() }
                 }
                 field("Number plate", $plate)
+                field("Make", $make)
                 field("Model", $model)
                 field("Owner", $owner)
                 Button("Save") {
-                    Task { await dev.setBikeInfo(plate: plate, model: model, owner: owner)
+                    Task { await dev.setBikeInfo(plate: plate, make: make,
+                                                 model: model, owner: owner)
                            await dev.refresh() }
                 }
                 .font(.system(size: 11)).buttonStyle(.plain)
                 .foregroundStyle(Color.accentColor)
-                Text("A long press on the vehicle screen walks the four layouts too.")
+                .disabled(unchanged)
+                .opacity(unchanged ? 0.4 : 1)
+                Text("Make and model are separate because \"Royal Enfield Meteor 350\" is "
+                     + "wider than the screen; each layout puts them where it has room.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("On the robot: hold on the vehicle screen to choose a layout, press "
+                     + "to walk them, hold again to keep the one you are looking at.")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -516,7 +533,7 @@ struct VehiclePane: View {
         .onAppear {
             guard !loaded else { return }
             loaded = true
-            plate = dev.plate; model = dev.model; owner = dev.owner
+            plate = dev.plate; make = dev.make; model = dev.model; owner = dev.owner
         }
     }
 

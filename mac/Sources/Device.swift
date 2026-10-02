@@ -9,6 +9,19 @@ import Network
 final class Device: ObservableObject {
     static let shared = Device()
 
+    /// Set only by the panel size check. Nothing reaches the network
+    /// while it is on, and nothing starts a repeating timer either.
+    ///
+    /// Without it the check could not measure a populated page at all.
+    /// Give it an address and it starts talking to the robot while the
+    /// check is spinning the run loop by hand; the two never get out of
+    /// each other's way and it stops after the first page. Give it no
+    /// address and every page draws the "where is the robot" prompt
+    /// instead of itself, so the numbers it prints are about a page
+    /// nobody ever sees. Either way the thing being measured was not
+    /// the thing being shipped.
+    nonisolated(unsafe) static var inert = false
+
     @AppStorage("deviceIP")    var ip: String = ""
     @AppStorage("watchClip")   var watchClipboard: Bool = false
     @AppStorage("breakMins")   var breakMins: Int = 45
@@ -66,6 +79,7 @@ final class Device: ObservableObject {
     @Published var bike = false
     @Published var btpl = 0
     @Published var plate = ""
+    @Published var make  = ""
     @Published var model = ""
     @Published var owner = ""
     @Published var deepi = 1
@@ -100,7 +114,10 @@ final class Device: ObservableObject {
     /// Must match WAKE_NAME in the firmware, in order.
     static let deepNames   = ["1 min", "2 min", "5 min", "10 min", "30 min", "never"]
     static let sleepNames2 = ["5s", "10s", "15s", "30s", "45s", "1m", "2m", "3m", "5m", "10m", "never"]
-    static let bikeTemplates = ["plate", "badge", "ticket", "dial"]
+    /// Must match the order of the cases in drawBike(). The robot is
+    /// sent an index, so a list in a different order picks a different
+    /// layout from the one you tapped.
+    static let bikeTemplates = ["plate", "badge", "board", "ticket", "speedo", "plain"]
     static let eyeNames    = ["round", "square", "wide", "sleepy", "joy", "cyclops"]
     static let tapNames    = ["ultra light", "light", "medium", "hard"]
 
@@ -254,8 +271,9 @@ final class Device: ObservableObject {
         await run("/api/cfgv", ["k": "btpl", "v": String(i)], say: nil)
         btpl = i
     }
-    func setBikeInfo(plate: String, model: String, owner: String) async {
-        await run("/api/bike", ["plate": plate, "model": model, "owner": owner], say: "Saved")
+    func setBikeInfo(plate: String, make: String, model: String, owner: String) async {
+        await run("/api/bike", ["plate": plate, "make": make,
+                                "model": model, "owner": owner], say: "Saved")
     }
 
     func setShake(_ on: Bool) async {
@@ -283,11 +301,75 @@ final class Device: ObservableObject {
         guard !list.isEmpty else { return true }
         var f: [String: String] = ["n": String(min(list.count, 12))]
         for (i, r) in list.prefix(12).enumerated() {
-            f["t\(i)"] = String(r.text.prefix(63))
+            f["t\(i)"] = String(r.text.prefix(Device.remTextMax))
             f["a\(i)"] = String(Int(r.fireAt.timeIntervalSince1970))
             f["d\(i)"] = r.done ? "1" : "0"
         }
         return await run("/api/rems", f, say: nil)
+    }
+
+    /// Must match REM_TEXT in the firmware, less the terminator. Send
+    /// more and the robot silently keeps the front of it, so the app
+    /// would show something the robot is not holding.
+    static let remTextMax = 95
+
+    // ---------------------------------------------------------------
+    //  the robot's own list
+    // ---------------------------------------------------------------
+    //  Reminders can arrive at the robot without this Mac ever seeing
+    //  them: a plain URL from a phone, a shortcut, anything. So the
+    //  robot's copy is the real one and this reads it rather than
+    //  assuming the app's copy is complete.
+
+    struct RobotRem: Decodable, Identifiable, Equatable {
+        let id: UInt32
+        let at: UInt32
+        let first: UInt32
+        let tries: Int
+        let done: Bool
+        let text: String
+        var fireAt: Date { Date(timeIntervalSince1970: TimeInterval(at)) }
+    }
+    private struct RemList: Decodable {
+        let ok: Bool
+        let waiting: Int
+        /// False when the robot has lost the time. Its stored times are
+        /// then meaningless and nothing will fire, which the app says
+        /// rather than showing times that will not happen.
+        let clock: Bool
+        let rems: [RobotRem]
+    }
+
+    /// nil means it could not be asked, which is not the same as an
+    /// empty list and must not be treated as one.
+    func fetchReminders() async -> (rems: [RobotRem], clock: Bool)? {
+        guard !Device.inert, !ip.isEmpty else { return nil }
+        do {
+            var req = URLRequest(url: try url("/api/rem?list=1"))
+            req.timeoutInterval = 4
+            req.setValue("1", forHTTPHeaderField: "X-Rafiq-App")
+            if !token.isEmpty { req.setValue(token, forHTTPHeaderField: "X-Rafiq-Token") }
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            let l = try JSONDecoder().decode(RemList.self, from: data)
+            reachable = true
+            return (l.rems, l.clock)
+        } catch { return nil }
+    }
+
+    @discardableResult
+    func clearReminders() async -> Bool {
+        await run("/api/rems", ["clear": "1"], say: nil)
+    }
+
+    func dropReminder(_ id: UInt32) async -> Bool {
+        await run("/api/rem", ["id": String(id), "drop": "1"], say: nil)
+    }
+
+    func editReminder(_ id: UInt32, text: String, at when: Date) async -> Bool {
+        await run("/api/rem", ["id": String(id),
+                               "text": String(text.prefix(Device.remTextMax)),
+                               "at": String(Int(when.timeIntervalSince1970))], say: nil)
     }
 
     func setKnock(_ on: Bool) async {
@@ -395,6 +477,7 @@ final class Device: ObservableObject {
     // ---------------------------------------------------------------
 
     func refresh() async {
+        guard !Device.inert else { return }
         guard !ip.isEmpty else { reachable = nil; return }
         do {
             var req = URLRequest(url: try url("/api/state"))
@@ -427,6 +510,7 @@ final class Device: ObservableObject {
             bike      = Self.jsonBool(s, "bike")
             btpl      = Self.jsonInt(s, "btpl")
             plate     = Self.jsonString(s, "plate") ?? plate
+            make      = Self.jsonString(s, "make") ?? make
             model     = Self.jsonString(s, "model") ?? model
             owner     = Self.jsonString(s, "owner") ?? owner
             deepi     = Self.jsonInt(s, "deepi")
@@ -457,6 +541,7 @@ final class Device: ObservableObject {
     /// because it has to know what still needs sending.
     @discardableResult
     private func run(_ path: String, _ fields: [String: String], say: String?) async -> Bool {
+        guard !Device.inert else { return false }
         guard !ip.isEmpty else { flash("Set the address first"); return false }
         busy = true
         defer { busy = false }

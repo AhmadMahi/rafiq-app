@@ -220,6 +220,12 @@ struct RemindSheet: View {
     @State private var mode = 0                 // 0 in a while, 1 at a time
     @State private var hour = Calendar.current.component(.hour, from: Date().addingTimeInterval(3600))
     @State private var minute = 0
+    /// Which row is open for editing, if any. One at a time: two open
+    /// rows in a 330 point window is two rows you cannot read.
+    @State private var editing: UUID?
+    @State private var editText = ""
+    @State private var editHour = 0
+    @State private var editMinute = 0
     @FocusState private var typing: Bool
 
     private let quick = [5, 10, 15, 30, 45, 60, 90, 120]
@@ -227,47 +233,6 @@ struct RemindSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             SheetHead(title: "Remind me", showing: $showing)
-
-            // A reminder written while the robot is asleep waits here
-            // until it wakes. Saying so beats looking like it was lost.
-            if !store.pending.isEmpty {
-                Divider()
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(store.pending.prefix(6)) { r in
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(r.fireAt, style: .time)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 52, alignment: .leading)
-                            Text(r.text).font(.system(size: 11)).lineLimit(1)
-                            Spacer()
-                            if !r.delivered {
-                                Image(systemName: "tray.and.arrow.up")
-                                    .font(.system(size: 9)).foregroundStyle(.secondary)
-                                    .help("waiting for the robot")
-                            }
-                            Button { store.remove(r) } label: {
-                                Image(systemName: "xmark.circle.fill").font(.system(size: 10))
-                            }
-                            .buttonStyle(.plain).foregroundStyle(.secondary)
-                        }
-                    }
-                    if store.pending.count > 6 {
-                        Text("and \(store.pending.count - 6) more")
-                            .font(.system(size: 9)).foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            if store.undelivered > 0 {
-                HStack(spacing: 5) {
-                    Image(systemName: "tray.and.arrow.up").font(.system(size: 10))
-                    Text("\(store.undelivered) waiting for the robot to wake up")
-                        .font(.system(size: 10))
-                    Spacer()
-                }
-                .foregroundStyle(.secondary)
-            }
 
             TextField("What about?", text: $text)
                 .textFieldStyle(.plain)
@@ -308,19 +273,7 @@ struct RemindSheet: View {
                 // be seen but never set. Two plain menus always work, and
                 // are quicker than typing a time anyway.
                 HStack(spacing: 6) {
-                    Picker("", selection: $hour) {
-                        ForEach(0..<24, id: \.self) { h in
-                            Text(String(format: "%02d", h)).tag(h)
-                        }
-                    }
-                    .labelsHidden().frame(width: 70)
-                    Text(":").foregroundStyle(.secondary)
-                    Picker("", selection: $minute) {
-                        ForEach(Array(stride(from: 0, to: 60, by: 5)), id: \.self) { m in
-                            Text(String(format: "%02d", m)).tag(m)
-                        }
-                    }
-                    .labelsHidden().frame(width: 70)
+                    ClockPickers(hour: $hour, minute: $minute)
                     Spacer()
                     Text(atNote).font(.system(size: 10)).foregroundStyle(.secondary)
                 }
@@ -338,26 +291,120 @@ struct RemindSheet: View {
             .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
             .opacity(text.trimmingCharacters(in: .whitespaces).isEmpty ? 0.4 : 1)
 
-            if !store.pending.isEmpty {
-                Divider().padding(.vertical, 1)
-                Text("Waiting").font(.system(size: 10)).foregroundStyle(.secondary)
-                ForEach(store.pending) { r in
-                    HStack(spacing: 6) {
-                        Text(Self.stamp(r.fireAt))
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 44, alignment: .leading)
-                        Text(r.text).font(.system(size: 11)).lineLimit(1)
-                        Spacer()
-                        Button { store.remove(r) } label: {
-                            Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
-                        }
-                        .buttonStyle(.plain).foregroundStyle(.secondary)
-                    }
+            // ------------------------------------------------------
+            //  The list, which is the robot's list and not this app's
+            // ------------------------------------------------------
+            //  It used to be drawn twice in this sheet, once above the
+            //  form and once below it, which made two reminders look
+            //  like four.
+            Divider().padding(.vertical, 1)
+            HStack(spacing: 5) {
+                Text(store.pending.isEmpty ? "Nothing waiting"
+                                           : "\(store.pending.count) waiting")
+                    .font(.system(size: 10, weight: .medium))
+                Spacer()
+                if store.undelivered > 0 {
+                    Image(systemName: "tray.and.arrow.up").font(.system(size: 9))
+                    Text("\(store.undelivered) queued").font(.system(size: 10))
                 }
+            }
+            .foregroundStyle(.secondary)
+
+            if !store.robotClock {
+                Label("The robot has lost the clock, so nothing will fire until it finds one.",
+                      systemImage: "clock.badge.exclamationmark")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(store.pending) { r in
+                if editing == r.id { editRow(r) } else { listRow(r) }
+            }
+
+            if !store.pending.isEmpty {
+                Button { store.clearAll() } label: {
+                    Text("Clear them all")
+                        .font(.system(size: 10))
+                        .frame(maxWidth: .infinity).padding(.vertical, 5)
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
             }
         }
         .onAppear { typing = true }
+    }
+
+    @ViewBuilder
+    private func listRow(_ r: Reminder) -> some View {
+        HStack(spacing: 6) {
+            Text(Self.stamp(r.fireAt))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 48, alignment: .leading)
+            Text(r.text).font(.system(size: 11)).lineLimit(1)
+            Spacer(minLength: 4)
+            if !r.delivered {
+                Image(systemName: "tray.and.arrow.up")
+                    .font(.system(size: 9)).foregroundStyle(.secondary)
+                    .help("waiting for the robot to wake up")
+            }
+            Button { open(r) } label: {
+                Image(systemName: "pencil").font(.system(size: 9, weight: .bold))
+            }
+            .buttonStyle(.plain).foregroundStyle(.secondary).help("change it")
+            Button { store.remove(r) } label: {
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+            }
+            .buttonStyle(.plain).foregroundStyle(.secondary).help("delete it")
+        }
+    }
+
+    @ViewBuilder
+    private func editRow(_ r: Reminder) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("What about?", text: $editText)
+                .textFieldStyle(.plain).font(.system(size: 11))
+                .padding(.horizontal, 7).padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(0.07)))
+            HStack(spacing: 6) {
+                ClockPickers(hour: $editHour, minute: $editMinute)
+                Spacer()
+                Button("Cancel") { editing = nil }
+                    .buttonStyle(.plain).font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Button("Save") {
+                    store.update(r, text: editText, at: Self.onDay(of: r.fireAt,
+                                                                   h: editHour, m: editMinute))
+                    editing = nil
+                }
+                .buttonStyle(.plain).font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .disabled(editText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(7)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color.accentColor.opacity(0.10)))
+    }
+
+    private func open(_ r: Reminder) {
+        editText = r.text
+        let c = Calendar.current.dateComponents([.hour, .minute], from: r.fireAt)
+        editHour = c.hour ?? 0
+        // The menu offers every fifth minute, so a reminder set to 09:07
+        // by a URL has to land on one of them or the picker shows blank.
+        editMinute = ((c.minute ?? 0) / 5) * 5
+        editing = r.id
+    }
+
+    /// Keep the day, change the time. Editing 09:00 to 18:00 on a
+    /// reminder set for tomorrow means tomorrow evening, not this one.
+    static func onDay(of d: Date, h: Int, m: Int) -> Date {
+        let cal = Calendar.current
+        var c = cal.dateComponents([.year, .month, .day], from: d)
+        c.hour = h; c.minute = m; c.second = 0
+        return cal.date(from: c) ?? d
     }
 
     private func add() {
@@ -391,6 +438,28 @@ struct RemindSheet: View {
         let f = DateFormatter()
         f.dateFormat = Calendar.current.isDateInToday(d) ? "HH:mm" : "E HH:mm"
         return f.string(from: d)
+    }
+}
+
+/// Two plain menus. A DatePicker inside a menu bar window never takes
+/// keyboard focus, so the time can be seen there but never set.
+struct ClockPickers: View {
+    @Binding var hour: Int
+    @Binding var minute: Int
+    var body: some View {
+        HStack(spacing: 4) {
+            Picker("", selection: $hour) {
+                ForEach(0..<24, id: \.self) { h in Text(String(format: "%02d", h)).tag(h) }
+            }
+            .labelsHidden().frame(width: 68)
+            Text(":").foregroundStyle(.secondary)
+            Picker("", selection: $minute) {
+                ForEach(Array(stride(from: 0, to: 60, by: 5)), id: \.self) { m in
+                    Text(String(format: "%02d", m)).tag(m)
+                }
+            }
+            .labelsHidden().frame(width: 68)
+        }
     }
 }
 

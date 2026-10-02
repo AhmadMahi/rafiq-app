@@ -185,11 +185,23 @@ struct Panel: View {
 
         private var overflows: Bool { tall > cap + 0.5 }
 
+        // The measurement may decide whether the page scrolls. It may
+        // not decide how wide the page is.
+        //
+        // The gutter used to be ten points only when the content
+        // overflowed, which laid the content out from a measurement of
+        // itself: add the gutter, the text has ten points less to wrap
+        // in, so it gets taller, so the height changes, so whether it
+        // overflows can change back. A page sitting near that line
+        // never settles and the panel churns through layout passes
+        // for as long as it is open. Constant now, so nothing that
+        // feeds the measurement depends on it. Scrolling and the
+        // indicator do not affect how anything is laid out, so they
+        // can still be told.
         var body: some View {
             ScrollView(.vertical) {
                 content()
-                    // A gutter for the bar, but only when there is a bar.
-                    .padding(.trailing, overflows ? 10 : 0)
+                    .padding(.trailing, 10)
                     .background(GeometryReader { g in
                         Color.clear.preference(key: H.self, value: g.size.height)
                     })

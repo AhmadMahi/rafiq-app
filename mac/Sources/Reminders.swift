@@ -10,6 +10,10 @@ struct Reminder: Codable, Identifiable, Equatable {
     /// here until the robot answers, because the robot is very often
     /// asleep when you think of something.
     var delivered = false
+    /// The robot's own id for this one, once it has taken it. Editing
+    /// and deleting go by this: matching on the words and the minute
+    /// fell apart the moment the thing being changed was the minute.
+    var robotId: UInt32?
 }
 
 /// A short list of things to be told about. Edited here, and mirrored
@@ -24,6 +28,13 @@ final class Reminders: ObservableObject {
     static let maxKept = 20
 
     @Published private(set) var items: [Reminder] = []
+    /// False when the robot has lost the clock. Its times then mean
+    /// nothing and nothing will fire, so the list says so instead of
+    /// showing times that will not happen.
+    @Published private(set) var robotClock = true
+    /// When the robot's list was last actually read, so the panel can
+    /// tell a genuinely empty robot from one that could not be asked.
+    @Published private(set) var lastSynced: Date?
 
     private var timer: Timer?
     private var fire: ((Reminder) -> Void)?
@@ -53,6 +64,65 @@ final class Reminders: ObservableObject {
         if let d = try? JSONEncoder().encode(items) {
             UserDefaults.standard.set(d, forKey: key)
         }
+        // The push does not hand back ids, so read the list straight
+        // after to find out what the robot called them. Without this
+        // the app could never edit or delete anything it had just sent.
+        await refresh()
+    }
+
+    /// Read the robot's own list and make this one agree with it.
+    ///
+    /// The robot's copy is the real one: reminders can arrive there
+    /// from a plain URL, a phone shortcut, anything, and never pass
+    /// through this Mac at all. Anything still queued here is left
+    /// alone, because the robot has not seen it yet and its absence
+    /// from the robot's list is not evidence of anything.
+    func refresh() async {
+        guard let (robot, clock) = await Device.shared.fetchReminders() else { return }
+        robotClock = clock
+        lastSynced = Date()
+
+        var byId: [UInt32: Int] = [:]
+        for (i, r) in items.enumerated() { if let rid = r.robotId { byId[rid] = i } }
+
+        var claimedLocally = Set<UUID>()
+        for rr in robot {
+            if let i = byId[rr.id] {
+                items[i].text = rr.text
+                items[i].fireAt = rr.fireAt
+                items[i].done = rr.done
+                items[i].delivered = true
+                claimedLocally.insert(items[i].id)
+                continue
+            }
+            // Something sent a moment ago, back with an id now. Claim
+            // it rather than showing the same reminder twice.
+            let minute = rr.at / 60
+            if let i = items.firstIndex(where: {
+                $0.robotId == nil && !claimedLocally.contains($0.id) &&
+                $0.text == rr.text && UInt32($0.fireAt.timeIntervalSince1970) / 60 == minute
+            }) {
+                items[i].robotId = rr.id
+                items[i].done = rr.done
+                items[i].delivered = true
+                claimedLocally.insert(items[i].id)
+                continue
+            }
+            // Never seen here: added straight to the robot.
+            var n = Reminder(text: rr.text, fireAt: rr.fireAt, done: rr.done)
+            n.delivered = true
+            n.robotId = rr.id
+            items.append(n)
+            claimedLocally.insert(n.id)
+        }
+
+        // Anything this app thought the robot had, and the robot does
+        // not: cleared on the robot, so cleared here.
+        let live = Set(robot.map(\.id))
+        items.removeAll { r in r.robotId.map { !live.contains($0) } ?? false }
+
+        items.sort { $0.fireAt < $1.fireAt }
+        persist()
     }
 
     var undelivered: Int {
@@ -62,12 +132,14 @@ final class Reminders: ObservableObject {
     func start(_ fire: @escaping (Reminder) -> Void) {
         self.fire = fire
         timer?.invalidate()
+        guard !Device.inert else { return }
         // Ten seconds is close enough for something measured in minutes,
         // and it costs nothing to check.
         timer = Timer.every(10) { [weak self] in
             Task { @MainActor in
                 self?.tick()
                 await self?.deliver()        // anything the robot missed
+                await self?.refresh()        // and anything added without us
             }
         }
         tick()
@@ -87,7 +159,35 @@ final class Reminders: ObservableObject {
 
     func remove(_ r: Reminder) {
         items.removeAll { $0.id == r.id }
-        save()
+        persist()                       // not save(): nothing to push
+        if let rid = r.robotId {
+            Task { _ = await Device.shared.dropReminder(rid) }
+        }
+    }
+
+    /// Change the words or the time of one already in the list. A
+    /// reminder the robot has is changed on the robot too; one still
+    /// queued here is simply queued differently.
+    func update(_ r: Reminder, text: String, at when: Date) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, let i = items.firstIndex(where: { $0.id == r.id }) else { return }
+        items[i].text = String(t.prefix(Device.remTextMax))
+        items[i].fireAt = when
+        items[i].done = false
+        items.sort { $0.fireAt < $1.fireAt }
+        persist()
+        if let rid = r.robotId {
+            let text = items.first { $0.id == r.id }?.text ?? t
+            Task { _ = await Device.shared.editReminder(rid, text: text, at: when) }
+        } else {
+            Task { await deliver() }    // not there yet; it goes with the next push
+        }
+    }
+
+    func clearAll() {
+        items.removeAll()
+        persist()
+        Task { await Device.shared.clearReminders() }
     }
 
     /// Ten minutes on, the same as a snooze on the robot.
@@ -118,9 +218,13 @@ final class Reminders: ObservableObject {
         }
     }
 
-    private func save() {
+    private func persist() {
         guard let d = try? JSONEncoder().encode(items) else { return }
         UserDefaults.standard.set(d, forKey: key)
+    }
+
+    private func save() {
+        persist()
         // And down to the robot, which keeps its own copy from firmware
         // 4.0.0. It has to: this Mac may be shut at nine in the morning,
         // and the robot can only wake itself for something it knows

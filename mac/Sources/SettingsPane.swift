@@ -312,6 +312,16 @@ struct EndpointHelp: View {
         return u
     }
 
+    /// The same bulk call as a one line shell command, for the case the
+    /// URL form does not cover: anything past about eight reminders is
+    /// too long to paste into a browser bar.
+    private var curl: String {
+        let now = Int(Date().timeIntervalSince1970)
+        return "curl -X POST http://\(host)/api/rems -d t=\(tok) -d n=2"
+            + " -d 't0=Water the plants' -d a0=\(now + 3600)"
+            + " -d 't1=Call the garage' -d a1=\(now + 7200)"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             line("In 45 minutes", url("in=45"), "in")
@@ -334,10 +344,41 @@ struct EndpointHelp: View {
             Divider().padding(.vertical, 2)
 
             line("Several at once", bulk, "bulk")
-            Text("n says how many; tN is the words and aN the time in unix seconds. "
-                 + "It adds what the robot has not got and leaves the rest alone, so "
-                 + "sending the same list twice is harmless. clear=1 empties it. "
-                 + "The robot puts a card up saying how many landed.")
+            VStack(alignment: .leading, spacing: 3) {
+                field("n",     "how many rows follow",   "required")
+                field("t0..",  "the words, one per row", "required")
+                field("a0..",  "unix seconds, per row",  "required")
+                field("d0..",  "1 to add it already done", "optional")
+                field("clear", "1 empties the whole list", "optional")
+            }
+            .padding(.top, 2)
+
+            Text("It adds what the robot has not got and leaves the rest alone, so "
+                 + "sending the same list twice is harmless. The robot puts a card up "
+                 + "saying how many landed.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            line("The same thing from a script", curl, "curl")
+            Text("POST works wherever the URL gets too long to paste, which is about "
+                 + "eight reminders.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider().padding(.vertical, 2)
+
+            line("Everything it is holding", "http://\(host)/api/rem?t=\(tok)&list=1", "list")
+            VStack(alignment: .leading, spacing: 3) {
+                field("list",  "1 returns the whole list",  "")
+                field("id",    "which one, from the list",  "to change")
+                field("drop",  "1 deletes that one",        "optional")
+                field("at",    "a new unix time for it",    "optional")
+                field("text",  "new words for it",          "optional")
+            }
+            .padding(.top, 2)
+            Text("Each reminder comes back with an id that does not change, so a script "
+                 + "can read the list, pick one and move it. clock:false in the reply "
+                 + "means the robot has lost the time and nothing will fire.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -348,6 +389,15 @@ struct EndpointHelp: View {
         }
     }
 
+    /// One snippet with a Copy button.
+    ///
+    /// Three lines, selectable, and that combination is not negotiable:
+    /// a selectable Text sharing a page with one that wraps past three
+    /// lines puts SwiftUI's layout into a loop it never comes out of,
+    /// and the settings page simply never finishes measuring itself.
+    /// Found by walking every page and watching it stop on this one.
+    /// Anything longer than three lines goes on one line and is used
+    /// through the Copy button.
     private func line(_ label: String, _ u: String, _ key: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
