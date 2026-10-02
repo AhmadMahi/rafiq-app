@@ -61,6 +61,13 @@ final class Device: ObservableObject {
     @Published var knock = false
     @Published var touches = 0
     @Published var shake = true
+    @Published var offline = false
+    @Published var netDown = false
+    @Published var bike = false
+    @Published var btpl = 0
+    @Published var plate = ""
+    @Published var model = ""
+    @Published var owner = ""
     @Published var deepi = 1
     @Published var battFull = 4.10
     @Published var battPct = -1        // -1 when there is no pack
@@ -85,10 +92,12 @@ final class Device: ObservableObject {
                               "dial", "bauhaus", "regulator", "rings", "infograph",
                               "status", "vitals", "bars", "terminal", "binary",
                               "arabic", "hijri", "crescent"]
-    static let sleepNames  = ["15s", "30s", "45s", "1m", "2m", "3m", "5m", "10m", "never"]
+    static let sleepNames  = ["5s", "10s", "15s", "30s", "45s", "1m", "2m", "3m", "5m", "10m", "never"]
     static let popupNames  = ["off", "5s", "10s", "20s", "30s", "60s"]
     /// Must match WAKE_NAME in the firmware, in order.
     static let deepNames   = ["1 min", "2 min", "5 min", "10 min", "30 min", "never"]
+    static let sleepNames2 = ["5s", "10s", "15s", "30s", "45s", "1m", "2m", "3m", "5m", "10m", "never"]
+    static let bikeTemplates = ["plate", "badge", "ticket", "dial"]
     static let eyeNames    = ["round", "square", "wide", "sleepy", "joy", "cyclops"]
     static let tapNames    = ["ultra light", "light", "medium", "hard"]
 
@@ -228,6 +237,22 @@ final class Device: ObservableObject {
     func setAutoUpdate(_ on: Bool) async {
         await run("/api/autoup", ["a": on ? "1" : "0"], say: nil)
         autoUp = on
+    }
+
+    func setOffline(_ on: Bool) async {
+        await run("/api/cfgv", ["k": "offl", "v": on ? "1" : "0"], say: nil)
+        offline = on
+    }
+    func setBike(_ on: Bool) async {
+        await run("/api/cfgv", ["k": "bike", "v": on ? "1" : "0"], say: nil)
+        bike = on
+    }
+    func setBikeTemplate(_ i: Int) async {
+        await run("/api/cfgv", ["k": "btpl", "v": String(i)], say: nil)
+        btpl = i
+    }
+    func setBikeInfo(plate: String, model: String, owner: String) async {
+        await run("/api/bike", ["plate": plate, "model": model, "owner": owner], say: "Saved")
     }
 
     func setShake(_ on: Bool) async {
@@ -394,6 +419,13 @@ final class Device: ObservableObject {
             autoUp    = Self.jsonBool(s, "autoUp")
             knock     = Self.jsonBool(s, "knock")
             shake     = Self.jsonBool(s, "shake")
+            offline   = Self.jsonBool(s, "offline")
+            netDown   = Self.jsonBool(s, "netDown")
+            bike      = Self.jsonBool(s, "bike")
+            btpl      = Self.jsonInt(s, "btpl")
+            plate     = Self.jsonString(s, "plate") ?? plate
+            model     = Self.jsonString(s, "model") ?? model
+            owner     = Self.jsonString(s, "owner") ?? owner
             deepi     = Self.jsonInt(s, "deepi")
             battPct   = Self.jsonInt(s, "battPct")
             if let bv = Self.jsonDouble(s, "battV")    { battV = bv }

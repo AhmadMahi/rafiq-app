@@ -11,7 +11,7 @@ struct RobotSettings: View {
 
     @State private var page: Page? = nil
     enum Page: Hashable { case brightness, face, sleep, tap, nets, turn, popup, eyes,
-                          battery, power, firmware, reset }
+                          battery, power, network, vehicle, firmware, reset }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -62,6 +62,8 @@ struct RobotSettings: View {
         case .turn:       return "Page turn"
         case .popup:      return "Popup time"
         case .eyes:       return "Eye style"
+        case .network:    return "Network"
+        case .vehicle:    return "Vehicle"
         case .battery:    return "Battery"
         case .power:      return "Power down"
         case .firmware:   return "Firmware"
@@ -103,6 +105,10 @@ struct RobotSettings: View {
                  detail: dev.autoUp ? "auto" : (dev.version.isEmpty ? "check" : dev.version)) { page = .firmware }
             Tile(icon: "arrow.counterclockwise", name: "Reset",
                  detail: "settings only") { page = .reset }
+            Tile(icon: dev.offline ? "wifi.slash" : "wifi", name: "Network",
+                 detail: dev.offline ? "off" : (dev.netDown ? "no signal" : "on")) { page = .network }
+            Tile(icon: "bicycle", name: "Vehicle",
+                 detail: dev.bike ? (Device.bikeTemplates[safe: dev.btpl] ?? "on") : "off") { page = .vehicle }
         }
     }
 
@@ -233,6 +239,31 @@ struct RobotSettings: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+
+        case .network:
+            VStack(alignment: .leading, spacing: 9) {
+                Toggle(isOn: Binding(get: { !dev.offline },
+                                     set: { v in Task { await dev.setOffline(!v); await dev.refresh() } })) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Use the network").font(.system(size: 12))
+                        Text("Off means the radio is off and stays off. Everything "
+                             + "except the weather still works, and it switches itself "
+                             + "off between touches to save the battery.")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch).controlSize(.small)
+                if dev.netDown && !dev.offline {
+                    Text("It tried and found nothing, so the radio is off until it next "
+                         + "wakes. This is not a fault.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+        case .vehicle:
+            VehiclePane()
 
         case .firmware:
             VStack(alignment: .leading, spacing: 9) {
@@ -439,4 +470,60 @@ struct Networks: View {
 
 extension Array {
     subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
+}
+
+
+/// The vehicle screen's contents. Four layouts; the robot cycles them
+/// on a long press and this picks one directly.
+struct VehiclePane: View {
+    @EnvironmentObject var dev: Device
+    @State private var plate = ""
+    @State private var model = ""
+    @State private var owner = ""
+    @State private var loaded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Toggle(isOn: Binding(get: { dev.bike },
+                                 set: { v in Task { await dev.setBike(v); await dev.refresh() } })) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Show the vehicle screen").font(.system(size: 12))
+                    Text("Second screen on the robot, after the clock")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch).controlSize(.small)
+
+            if dev.bike {
+                Divider()
+                Choice(names: Device.bikeTemplates, current: dev.btpl) { i in
+                    Task { await dev.setBikeTemplate(i); await dev.refresh() }
+                }
+                field("Number plate", $plate)
+                field("Model", $model)
+                field("Owner", $owner)
+                Button("Save") {
+                    Task { await dev.setBikeInfo(plate: plate, model: model, owner: owner)
+                           await dev.refresh() }
+                }
+                .font(.system(size: 11)).buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                Text("A long press on the vehicle screen walks the four layouts too.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onAppear {
+            guard !loaded else { return }
+            loaded = true
+            plate = dev.plate; model = dev.model; owner = dev.owner
+        }
+    }
+
+    private func field(_ label: String, _ v: Binding<String>) -> some View {
+        HStack(spacing: 6) {
+            Text(label).font(.system(size: 11)).frame(width: 86, alignment: .leading)
+            TextField("", text: v).textFieldStyle(.roundedBorder).font(.system(size: 11))
+        }
+    }
 }
