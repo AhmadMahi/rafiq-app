@@ -82,8 +82,11 @@ final class Device: ObservableObject {
 
     // The choices the robot itself offers, kept here so the app and the
     // panel can never disagree about what they mean.
-    static let brightNames = ["dim", "25%", "50%", "75%", "100%"]
-    static let brightVals  = [0, 64, 128, 191, 255]
+    /// Must match BRIGHT_NAME and BRIGHT_OPTS in the firmware. The
+    /// robot is sent a contrast value, so a list that disagrees sets
+    /// the wrong one and mislabels what is already there.
+    static let brightNames = ["10%", "25%", "50%", "75%", "100%"]
+    static let brightVals  = [26, 64, 128, 191, 255]
     /// Must match FACE_NAME in the firmware, in order: the robot is
     /// told a number, so a list that disagrees picks the wrong face
     /// and mislabels the one that is on.

@@ -230,6 +230,35 @@ struct RemindSheet: View {
 
             // A reminder written while the robot is asleep waits here
             // until it wakes. Saying so beats looking like it was lost.
+            if !store.pending.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(store.pending.prefix(6)) { r in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(r.fireAt, style: .time)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 52, alignment: .leading)
+                            Text(r.text).font(.system(size: 11)).lineLimit(1)
+                            Spacer()
+                            if !r.delivered {
+                                Image(systemName: "tray.and.arrow.up")
+                                    .font(.system(size: 9)).foregroundStyle(.secondary)
+                                    .help("waiting for the robot")
+                            }
+                            Button { store.remove(r) } label: {
+                                Image(systemName: "xmark.circle.fill").font(.system(size: 10))
+                            }
+                            .buttonStyle(.plain).foregroundStyle(.secondary)
+                        }
+                    }
+                    if store.pending.count > 6 {
+                        Text("and \(store.pending.count - 6) more")
+                            .font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             if store.undelivered > 0 {
                 HStack(spacing: 5) {
                     Image(systemName: "tray.and.arrow.up").font(.system(size: 10))

@@ -299,6 +299,18 @@ struct EndpointHelp: View {
     private func url(_ when: String) -> String {
         "http://\(host)/api/remind?t=\(tok)&text=\(esc("Call mum"))&\(when)"
     }
+    /// Three at once, with times an hour, two and three from now so the
+    /// example is one you can paste and watch arrive.
+    private var bulk: String {
+        let now = Int(Date().timeIntervalSince1970)
+        var u = "http://\(host)/api/rems?t=\(tok)&n=3"
+        let rows = [("Water the plants", 3600), ("Call the garage", 7200),
+                    ("Take the bins out", 10800)]
+        for (i, r) in rows.enumerated() {
+            u += "&t\(i)=\(esc(r.0))&a\(i)=\(now + r.1)"
+        }
+        return u
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -321,10 +333,11 @@ struct EndpointHelp: View {
 
             Divider().padding(.vertical, 2)
 
-            Text("Several at once").font(.system(size: 11, weight: .medium))
-            Text("POST /api/rems with n=3 and t0..t2, a0..a2 as unix seconds. "
-                 + "It adds what the robot has not got and leaves the rest alone, "
-                 + "so sending the same list twice is harmless. clear=1 empties it.")
+            line("Several at once", bulk, "bulk")
+            Text("n says how many; tN is the words and aN the time in unix seconds. "
+                 + "It adds what the robot has not got and leaves the rest alone, so "
+                 + "sending the same list twice is harmless. clear=1 empties it. "
+                 + "The robot puts a card up saying how many landed.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
