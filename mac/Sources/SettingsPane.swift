@@ -319,6 +319,15 @@ struct EndpointHelp: View {
                 .font(.system(size: 10)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            Divider().padding(.vertical, 2)
+
+            Text("Several at once").font(.system(size: 11, weight: .medium))
+            Text("POST /api/rems with n=3 and t0..t2, a0..a2 as unix seconds. "
+                 + "It adds what the robot has not got and leaves the rest alone, "
+                 + "so sending the same list twice is harmless. clear=1 empties it.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             Text("The token in the address is what stops anyone else on your network "
                  + "driving the robot. Treat the whole link like a password.")
                 .font(.system(size: 9)).foregroundStyle(.secondary)

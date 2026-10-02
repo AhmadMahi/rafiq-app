@@ -247,14 +247,19 @@ final class Device: ObservableObject {
     /// The whole list, every time. A dozen short lines is smaller than
     /// working out what changed, and the robot needs all of them to know
     /// when to wake itself up.
-    func pushReminders(_ list: [Reminder]) async {
+    /// Returns whether the robot actually took them. The caller only
+    /// marks them delivered on a true, so a robot that is asleep or
+    /// unplugged simply means trying again later.
+    @discardableResult
+    func pushReminders(_ list: [Reminder]) async -> Bool {
+        guard !list.isEmpty else { return true }
         var f: [String: String] = ["n": String(min(list.count, 12))]
         for (i, r) in list.prefix(12).enumerated() {
             f["t\(i)"] = String(r.text.prefix(63))
             f["a\(i)"] = String(Int(r.fireAt.timeIntervalSince1970))
             f["d\(i)"] = r.done ? "1" : "0"
         }
-        await run("/api/rems", f, say: nil)
+        return await run("/api/rems", f, say: nil)
     }
 
     func setKnock(_ on: Bool) async {
@@ -412,20 +417,29 @@ final class Device: ObservableObject {
 
     private var statusClear: Task<Void, Never>?
 
-    private func run(_ path: String, _ fields: [String: String], say: String?) async {
-        guard !ip.isEmpty else { flash("Set the address first"); return }
+    /// Returns whether the robot took it. Most callers ignore that and
+    /// read the flash message instead; the reminder queue does not,
+    /// because it has to know what still needs sending.
+    @discardableResult
+    private func run(_ path: String, _ fields: [String: String], say: String?) async -> Bool {
+        guard !ip.isEmpty else { flash("Set the address first"); return false }
         busy = true
         defer { busy = false }
         do {
             _ = try await post(path, fields)
             reachable = true
             if let say { flash(say) }
+            return true
         } catch let e as URLError where e.code == .userAuthenticationRequired {
             reachable = true
             flash("Pair with the robot first")
+            return false
         } catch {
             reachable = false
-            flash("Could not reach it")
+            // Quietly: a sleeping robot is the normal case for the
+            // reminder queue, not something to put on the screen.
+            if say != nil { flash("Could not reach it") }
+            return false
         }
     }
 

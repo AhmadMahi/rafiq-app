@@ -228,6 +228,18 @@ struct RemindSheet: View {
         VStack(alignment: .leading, spacing: 9) {
             SheetHead(title: "Remind me", showing: $showing)
 
+            // A reminder written while the robot is asleep waits here
+            // until it wakes. Saying so beats looking like it was lost.
+            if store.undelivered > 0 {
+                HStack(spacing: 5) {
+                    Image(systemName: "tray.and.arrow.up").font(.system(size: 10))
+                    Text("\(store.undelivered) waiting for the robot to wake up")
+                        .font(.system(size: 10))
+                    Spacer()
+                }
+                .foregroundStyle(.secondary)
+            }
+
             TextField("What about?", text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))

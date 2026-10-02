@@ -6,6 +6,10 @@ struct Reminder: Codable, Identifiable, Equatable {
     var text: String
     var fireAt: Date
     var done = false
+    /// Whether the robot has it. Reminders are written here and kept
+    /// here until the robot answers, because the robot is very often
+    /// asleep when you think of something.
+    var delivered = false
 }
 
 /// A short list of things to be told about. Edited here, and mirrored
@@ -31,13 +35,40 @@ final class Reminders: ObservableObject {
         items.filter { !$0.done }.sorted { $0.fireAt < $1.fireAt }
     }
 
+    /// Hands the robot everything it has not got yet, and marks them
+    /// off only when it says so. Anything still undelivered waits for
+    /// the next go: a robot that is switched off is the normal case,
+    /// not an error.
+    ///
+    /// Nothing is ever withdrawn. The robot owns the list now, and a
+    /// push that replaced it would throw away anything added straight
+    /// to the robot, which is exactly what used to happen.
+    func deliver() async {
+        let waiting = items.filter { !$0.delivered && !$0.done && $0.fireAt > Date() }
+        guard !waiting.isEmpty else { return }
+        guard await Device.shared.pushReminders(waiting) else { return }
+        for i in items.indices where waiting.contains(where: { $0.id == items[i].id }) {
+            items[i].delivered = true
+        }
+        if let d = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(d, forKey: key)
+        }
+    }
+
+    var undelivered: Int {
+        items.filter { !$0.delivered && !$0.done && $0.fireAt > Date() }.count
+    }
+
     func start(_ fire: @escaping (Reminder) -> Void) {
         self.fire = fire
         timer?.invalidate()
         // Ten seconds is close enough for something measured in minutes,
         // and it costs nothing to check.
         timer = Timer.every(10) { [weak self] in
-            Task { @MainActor in self?.tick() }
+            Task { @MainActor in
+                self?.tick()
+                await self?.deliver()        // anything the robot missed
+            }
         }
         tick()
     }
@@ -95,8 +126,7 @@ final class Reminders: ObservableObject {
         // and the robot can only wake itself for something it knows
         // about. The Mac still owns the editing; the robot owns the
         // knowing when.
-        let list = pending
-        Task { await Device.shared.pushReminders(list) }
+        Task { await deliver() }
     }
     private func load() {
         guard let d = UserDefaults.standard.data(forKey: key),
