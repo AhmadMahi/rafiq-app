@@ -162,6 +162,10 @@ struct SettingsPane: View {
                     }
                 }
 
+                Group2(title: "Reminders over the network") {
+                    EndpointHelp()
+                }
+
                 Group2(title: "Quick phrases") {
                     PhraseEditor()
                 }
@@ -272,5 +276,77 @@ struct PhraseEditor: View {
         let j = i + d
         guard v.indices.contains(i), v.indices.contains(j) else { return }
         v.swapAt(i, j); write(v)
+    }
+}
+
+
+/// The robot takes reminders over HTTP, so anything on your network can
+/// add one: a Shortcut, a cron line, another machine. This is here
+/// rather than in a README because the address and the token are yours
+/// and nobody else can write them down for you.
+struct EndpointHelp: View {
+    @EnvironmentObject var dev: Device
+    @State private var copied = false
+
+    private var curl: String {
+        let ip = dev.ip.isEmpty ? "robot.local" : dev.ip
+        let tok = dev.token.isEmpty ? "YOUR-TOKEN" : dev.token
+        return "curl -X POST http://\(ip)/api/remind \\\n"
+             + "  -H 'X-Rafiq-App: 1' -H 'X-Rafiq-Token: \(tok)' \\\n"
+             + "  -d 'text=Take the washing out' -d 'at=18:30'"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("POST or GET  /api/remind")
+                .font(.system(size: 11, design: .monospaced))
+
+            VStack(alignment: .leading, spacing: 3) {
+                field("text", "what to be reminded of", "required")
+                field("at", "HH:MM, 24 hour", "optional")
+                field("d", "YYYY-MM-DD", "optional, today")
+            }
+
+            Text("No date means today. No time at all means three times that day, "
+                 + "at nine, noon and six, skipping any hour already gone.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(curl)
+                .font(.system(size: 9, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(0.06)))
+
+            HStack {
+                Button(copied ? "Copied" : "Copy the command") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(curl, forType: .string)
+                    copied = true
+                    Task { try? await Task.sleep(nanoseconds: 1_500_000_000); copied = false }
+                }
+                .font(.system(size: 11))
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                Spacer()
+            }
+
+            Text("The token is what stops anyone else on your network driving the robot. "
+                 + "Treat it like a password.")
+                .font(.system(size: 9)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func field(_ k: String, _ what: String, _ need: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(k).font(.system(size: 10, design: .monospaced))
+                .frame(width: 34, alignment: .leading)
+            Text(what).font(.system(size: 10))
+            Spacer()
+            Text(need).font(.system(size: 9)).foregroundStyle(.secondary)
+        }
     }
 }
