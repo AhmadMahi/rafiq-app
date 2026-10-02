@@ -83,7 +83,8 @@ final class Device: ObservableObject {
     static let faceNames   = ["classic", "stacked", "date up", "minimal", "side",
                               "banner", "drift", "parallax", "water", "sand",
                               "dial", "bauhaus", "regulator", "rings", "infograph",
-                              "status", "vitals", "bars", "terminal", "binary"]
+                              "status", "vitals", "bars", "terminal", "binary",
+                              "arabic", "hijri", "crescent"]
     static let sleepNames  = ["15s", "30s", "45s", "1m", "2m", "3m", "5m", "10m", "never"]
     static let popupNames  = ["off", "5s", "10s", "20s", "30s", "60s"]
     /// Must match WAKE_NAME in the firmware, in order.
