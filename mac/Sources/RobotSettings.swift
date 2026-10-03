@@ -7,11 +7,10 @@ import SwiftUI
 /// was making both harder to find.
 struct RobotSettings: View {
     @EnvironmentObject var dev: Device
-    @ObservedObject private var ges = Gestures.shared
     @Binding var showing: Bool
 
     @State private var page: Page? = nil
-    enum Page: Hashable { case gesture, brightness, face, sleep, tap, nets, turn, popup, eyes,
+    enum Page: Hashable { case brightness, face, sleep, tap, nets, turn, popup, eyes,
                           battery, power, network, vehicle, firmware, reset }
 
     var body: some View {
@@ -65,7 +64,6 @@ struct RobotSettings: View {
         case .eyes:       return "Eye style"
         case .network:    return "Network"
         case .vehicle:    return "Vehicle"
-        case .gesture:    return "Gesture mode"
         case .battery:    return "Battery"
         case .power:      return "Power down"
         case .firmware:   return "Firmware"
@@ -109,8 +107,6 @@ struct RobotSettings: View {
                  detail: "settings only") { page = .reset }
             Tile(icon: dev.offline ? "wifi.slash" : "wifi", name: "Network",
                  detail: dev.offline ? "off" : (dev.netDown ? "no signal" : "on")) { page = .network }
-            Tile(icon: "hand.tap", name: "Gestures",
-                 detail: ges.on ? "on" : "off") { page = .gesture }
             Tile(icon: "arrow.down.circle", name: "Update",
                  detail: dev.version.isEmpty ? "the robot" : dev.version) {
                 Task { await dev.checkUpdate() }
@@ -272,9 +268,6 @@ struct RobotSettings: View {
 
         case .vehicle:
             VehiclePane()
-
-        case .gesture:
-            GesturePane()
 
         case .firmware:
             VStack(alignment: .leading, spacing: 9) {
@@ -567,9 +560,11 @@ struct VehiclePane: View {
 struct GesturePane: View {
     @EnvironmentObject var dev: Device
     @ObservedObject private var g = Gestures.shared
+    @Binding var showing: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            SheetHead(title: "Gestures", showing: $showing)
 
             // ---- the switch, with its state on the right where the
             // ---- rest of the app puts it
@@ -590,6 +585,21 @@ struct GesturePane: View {
                     if !g.lastSaid.isEmpty {
                         Text(g.lastSaid).font(.system(size: 10))
                             .foregroundStyle(Color.accentColor).lineLimit(1)
+                    }
+                }
+
+                Group2(title: "What the robot listens for") {
+                    Picker("", selection: $g.source) {
+                        ForEach(0..<Gestures.sourceNames.count, id: \.self) {
+                            Text(Gestures.sourceNames[$0]).tag($0)
+                        }
+                    }
+                    .pickerStyle(.radioGroup).labelsHidden()
+                    if g.source == 2 {
+                        Text("Pressing the pad knocks the robot, so the robot throws away "
+                             + "the knock your own finger made. Only the press is sent.")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -637,6 +647,7 @@ struct GesturePane: View {
                 }
             }
         }
+        .onAppear { g.readShortcuts() }
     }
 
     private var status: String {
@@ -703,6 +714,7 @@ struct MapRow: View {
 struct ActionPicker: View {
     let title: String
     @Binding var action: GAction
+    @ObservedObject private var g = Gestures.shared
     @State private var text = ""
 
     private enum Kind: String, CaseIterable { case nothing, app, shortcut, keys
@@ -731,18 +743,40 @@ struct ActionPicker: View {
             Picker("", selection: Binding(get: { kind }, set: { set($0) })) {
                 ForEach(Kind.allCases, id: \.self) { Text($0.label).tag($0) }
             }
-            .labelsHidden().frame(width: 96)
-            if kind == .app {
+            .labelsHidden().frame(width: 92)
+
+            switch kind {
+            case .nothing:
+                Spacer(minLength: 0)
+            case .app:
                 Button(pickLabel) { pickApp() }
                     .font(.system(size: 10)).buttonStyle(.plain)
-                    .foregroundStyle(Color.accentColor)
-            } else if kind != .nothing {
-                TextField(kind == .keys ? "cmd+shift+a" : "Shortcut name", text: $text)
+                    .foregroundStyle(Color.accentColor).lineLimit(1)
+                Spacer(minLength: 0)
+            case .shortcut:
+                // Chosen from the ones you have, not typed. Nobody
+                // remembers the exact name of a shortcut, and a name
+                // that is one character out fails silently.
+                Menu {
+                    if g.shortcuts.isEmpty {
+                        Text(g.readingShortcuts ? "Reading…" : "No shortcuts found")
+                    }
+                    ForEach(g.shortcuts, id: \.self) { n in
+                        Button(n) { action = .shortcut(n); text = n }
+                    }
+                    Divider()
+                    Button("Reload the list") { g.readShortcuts() }
+                } label: {
+                    Text(text.isEmpty ? "Choose a shortcut" : text)
+                        .font(.system(size: 10)).lineLimit(1)
+                }
+                .menuStyle(.borderlessButton)
+            case .keys:
+                TextField("cmd+shift+a", text: $text)
                     .textFieldStyle(.roundedBorder).font(.system(size: 10))
                     .onSubmit(commit)
                     .onChange(of: text) { _, _ in commit() }
             }
-            Spacer(minLength: 0)
         }
         .onAppear {
             switch action {
@@ -764,16 +798,12 @@ struct ActionPicker: View {
         switch k {
         case .nothing:  action = .nothing
         case .app:      action = .openApp("")
-        case .shortcut: action = .shortcut(text)
+        case .shortcut: action = .shortcut(text); g.readShortcuts()
         case .keys:     action = .keys(text)
         }
     }
     private func commit() {
-        switch kind {
-        case .shortcut: action = .shortcut(text)
-        case .keys:     action = .keys(text)
-        default:        break
-        }
+        if case .keys = kind { action = .keys(text) }
     }
     private func pickApp() {
         let p = NSOpenPanel()

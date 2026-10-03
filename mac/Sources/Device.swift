@@ -410,6 +410,10 @@ final class Device: ObservableObject {
         gesture = on
     }
 
+    func setGestureSource(_ i: Int) async {
+        await run("/api/cfgv", ["k": "gsrc", "v": String(i)], say: nil)
+    }
+
     func setKnock(_ on: Bool) async {
         knock = on; justChanged()   // believed at once, see trustLocalUntil
         await run("/api/cfgv", ["k": "knock", "v": on ? "1" : "0"], say: nil)

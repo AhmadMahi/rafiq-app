@@ -69,6 +69,16 @@ final class Gestures: ObservableObject {
     /// tap should do, so that stays yours.
     @Published var micTakesOver = true { didSet { persist() } }
     @Published var maps: [GMap] = [GMap(bundleId: nil)] { didSet { persist() } }
+    /// Knock the desk, touch the pad, or either. Either is workable
+    /// but the robot has to throw away the knock your own finger
+    /// makes pressing the pad, which it does.
+    @Published var source = 0 { didSet { persist(); pushSource() } }
+    static let sourceNames = ["Knock the desk", "Touch the pad", "Either"]
+
+    /// The user's own Shortcuts, read from the Shortcuts app rather
+    /// than typed from memory. Nobody remembers the exact name.
+    @Published private(set) var shortcuts: [String] = []
+    @Published private(set) var readingShortcuts = false
 
     /// What the mic is doing, as far as we have set it.
     @Published private(set) var muted = false
@@ -255,11 +265,52 @@ final class Gestures: ObservableObject {
     //  keeping the robot in step
     // ------------------------------------------------------------
     func push() {
-        Task { await Device.shared.setGesture(on) }
+        Task {
+            await Device.shared.setGesture(on)
+            if on { await Device.shared.setGestureSource(source) }
+        }
+    }
+    private func pushSource() {
+        guard on else { return }
+        Task { await Device.shared.setGestureSource(source) }
+    }
+
+    /// `shortcuts list`, which is how the Shortcuts app says what you
+    /// have. Reading it is cheap and it changes rarely, so it is read
+    /// when the pane opens rather than watched.
+    func readShortcuts() {
+        guard !readingShortcuts else { return }
+        readingShortcuts = true
+        Task.detached {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
+            p.arguments = ["list"]
+            let pipe = Pipe()
+            p.standardOutput = pipe
+            p.standardError = Pipe()
+            var names: [String] = []
+            do {
+                try p.run()
+                let d = pipe.fileHandleForReading.readDataToEndOfFile()
+                p.waitUntilExit()
+                names = (String(data: d, encoding: .utf8) ?? "")
+                    .split(separator: "\n").map(String.init)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                    .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            } catch {
+                NSLog("could not read the shortcuts: \(error)")
+            }
+            let got = names
+            await MainActor.run {
+                self.shortcuts = got
+                self.readingShortcuts = false
+            }
+        }
     }
 
     private func persist() {
-        let box = Box(on: on, micTakesOver: micTakesOver, maps: maps)
+        let box = Box(on: on, micTakesOver: micTakesOver, maps: maps, source: source)
         if let d = try? JSONEncoder().encode(box) {
             UserDefaults.standard.set(d, forKey: key)
         }
@@ -268,9 +319,13 @@ final class Gestures: ObservableObject {
         guard let d = UserDefaults.standard.data(forKey: key),
               let b = try? JSONDecoder().decode(Box.self, from: d) else { return }
         on = b.on; micTakesOver = b.micTakesOver
+        source = b.source ?? 0
         maps = b.maps.isEmpty ? [GMap(bundleId: nil)] : b.maps
     }
-    private struct Box: Codable { var on: Bool; var micTakesOver: Bool; var maps: [GMap] }
+    private struct Box: Codable {
+        var on: Bool; var micTakesOver: Bool; var maps: [GMap]
+        var source: Int? = nil
+    }
 }
 
 // ================================================================

@@ -75,10 +75,12 @@ struct Panel: View {
     @State private var showRemind = false
     @State private var showPhrases = false
     @State private var showRobot = false
+    @State private var showGestures = false
     @FocusState private var typing: Bool
     @Environment(\.colorScheme) private var systemScheme
 
-    enum Page: String { case grid, settings, robot, pair, focus, breakNow, remind, phrases }
+    enum Page: String { case grid, settings, robot, pair, focus, breakNow, remind,
+                        phrases, gestures }
 
     /// The panel is this size on every page, always.
     ///
@@ -108,6 +110,7 @@ struct Panel: View {
         if keep != .breakNow { showBreak = false }
         if keep != .remind   { showRemind = false }
         if keep != .phrases  { showPhrases = false }
+        if keep != .gestures { showGestures = false }
     }
 
     var body: some View {
@@ -154,6 +157,7 @@ struct Panel: View {
             case .breakNow: showBreak = true
             case .remind:   showRemind = true
             case .phrases:  showPhrases = true
+            case .gestures: showGestures = true
             case .grid, .pair: break
             }
         }
@@ -222,6 +226,8 @@ struct Panel: View {
             FirstRun()
         } else if showSettings {
             scrolling { SettingsPane(showing: $showSettings) }
+        } else if showGestures {
+            scrolling { GesturePane(showing: $showGestures) }
         } else if showRobot {
             scrolling { RobotSettings(showing: $showRobot) }
         } else if dev.pairing {
@@ -387,7 +393,11 @@ struct Panel: View {
                  detail: ges.on ? (ges.micLive ? (ges.muted ? "muted" : "on a call") : "on")
                                 : "off",
                  on: ges.on, enabled: dev.reachable == true) {
+                // Switching it on opens the page, because switching it
+                // on is when you want to see what a knock will do.
+                // Switching it off is just off.
                 ges.on.toggle()
+                if ges.on { showGestures = true; closeOthers(except: .gestures) }
             }
             Tile(icon: "moon.zzz", name: "Deep sleep",
                  detail: dev.blocked(.deepSleep) ?? "power to wake",

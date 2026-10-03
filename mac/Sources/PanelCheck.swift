@@ -25,7 +25,8 @@ import AppKit
 @MainActor
 enum PanelSizeCheck {
     private static let pages: [Panel.Page] =
-        [.grid, .settings, .grid, .robot, .grid, .remind, .grid, .phrases, .grid]
+        [.grid, .settings, .grid, .robot, .grid, .remind, .grid, .phrases,
+         .grid, .gestures, .grid]
 
     private static func say(_ s: String) { print(s); fflush(stdout) }
     /// No newline, so the result can finish the line the page name
