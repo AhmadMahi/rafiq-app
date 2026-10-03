@@ -52,6 +52,7 @@ final class Device: ObservableObject {
     @Published var status: String = ""
     @Published var reachable: Bool? = nil
     @Published var busy = false
+    @Published var gesture = false
 
     /// What the robot last told us about itself. Everything the grid shows
     /// comes from here, so a tile is never lit unless the device agrees.
@@ -229,8 +230,9 @@ final class Device: ObservableObject {
     }
 
     /// One flag per device. Nothing about what is being said or seen.
-    func setBusy(cam: Bool, mic: Bool) async {
-        await run("/api/busy", ["cam": cam ? "1" : "0", "mic": mic ? "1" : "0"], say: nil)
+    func setBusy(cam: Bool, mic: Bool, muted: Bool) async {
+        await run("/api/busy", ["cam": cam ? "1" : "0", "mic": mic ? "1" : "0",
+                                "muted": muted ? "1" : "0"], say: nil)
     }
 
     func remind(_ text: String) async {
@@ -372,6 +374,15 @@ final class Device: ObservableObject {
                                "at": String(Int(when.timeIntervalSince1970))], say: nil)
     }
 
+    /// Gesture mode is not remembered on the robot: it comes up as a
+    /// robot and this tells it otherwise. Sent on every refresh while
+    /// it is on, so a robot that restarts comes back into the mode by
+    /// itself, and dropped the moment this app stops answering.
+    func setGesture(_ on: Bool) async {
+        await run("/api/cfgv", ["k": "gest", "v": on ? "1" : "0"], say: nil)
+        gesture = on
+    }
+
     func setKnock(_ on: Bool) async {
         await run("/api/cfgv", ["k": "knock", "v": on ? "1" : "0"], say: nil)
         knock = on
@@ -501,6 +512,7 @@ final class Device: ObservableObject {
             dndLeft   = Self.jsonInt(s, "dndLeft")
             version   = Self.jsonString(s, "fw") ?? version
             intWired  = Self.jsonBool(s, "intWired")
+            gesture   = Self.jsonBool(s, "gesture")
             deepOff   = Self.jsonBool(s, "deepOff")
             autoUp    = Self.jsonBool(s, "autoUp")
             knock     = Self.jsonBool(s, "knock")

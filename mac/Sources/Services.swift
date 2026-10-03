@@ -30,6 +30,10 @@ final class Services: ObservableObject {
 
     func start() {
         Task { await dev.refresh() }
+        // The ear for the robot's presses, and the mode pushed back
+        // to it so a robot that restarted comes into it again.
+        Gestures.shared.start()
+        if Gestures.shared.on { Gestures.shared.push() }
         idle?.invalidate()
         // Locking when you have walked away is worth checking often enough
         // to be useful and rarely enough to cost nothing.
@@ -40,7 +44,15 @@ final class Services: ObservableObject {
         // Ten seconds keeps the menu bar honest without being chatty. The
         // device answers this in well under a millisecond.
         poll = Timer.every(10) { [weak self] in
-            Task { @MainActor in await self?.dev.refresh() }
+            Task { @MainActor in
+                await self?.dev.refresh()
+                // The robot drops gesture mode whenever this app goes
+                // quiet, which is what makes quitting Rafiq enough to
+                // get the robot back. The other side of that bargain
+                // is saying so again every time we check in.
+                let g = Gestures.shared
+                if g.on && self?.dev.gesture == false { g.push() }
+            }
         }
         syncClipboard()
         syncBreaks()
@@ -60,14 +72,18 @@ final class Services: ObservableObject {
         guard dev.watchAV else {
             av.stop()
             avLive = false
-            Task { await dev.setBusy(cam: false, mic: false) }
+            Gestures.shared.micLive = false
+            Gestures.shared.camLive = false
+            Task { await dev.setBusy(cam: false, mic: false, muted: false) }
             return
         }
         av.start { [weak self] cam, mic in
             Task { @MainActor in
                 guard let self else { return }
                 self.avLive = cam || mic
-                await self.dev.setBusy(cam: cam, mic: mic)
+                Gestures.shared.micLive = mic
+                Gestures.shared.camLive = cam
+                await self.dev.setBusy(cam: cam, mic: mic, muted: Gestures.shared.muted)
             }
         }
     }

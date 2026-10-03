@@ -48,6 +48,8 @@ enum PanelSizeCheck {
         d.linked = true
         d.version = "5.2.0"
         d.bike = true
+        d.gesture = true
+        Gestures.shared.on = true
         d.plate = "KA 50 HJ 5683"
         d.make = "Royal Enfield"
         d.model = "Meteor 350"

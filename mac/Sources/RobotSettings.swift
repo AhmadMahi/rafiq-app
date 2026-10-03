@@ -7,10 +7,11 @@ import SwiftUI
 /// was making both harder to find.
 struct RobotSettings: View {
     @EnvironmentObject var dev: Device
+    @ObservedObject private var ges = Gestures.shared
     @Binding var showing: Bool
 
     @State private var page: Page? = nil
-    enum Page: Hashable { case brightness, face, sleep, tap, nets, turn, popup, eyes,
+    enum Page: Hashable { case gesture, brightness, face, sleep, tap, nets, turn, popup, eyes,
                           battery, power, network, vehicle, firmware, reset }
 
     var body: some View {
@@ -64,6 +65,7 @@ struct RobotSettings: View {
         case .eyes:       return "Eye style"
         case .network:    return "Network"
         case .vehicle:    return "Vehicle"
+        case .gesture:    return "Gesture mode"
         case .battery:    return "Battery"
         case .power:      return "Power down"
         case .firmware:   return "Firmware"
@@ -107,6 +109,8 @@ struct RobotSettings: View {
                  detail: "settings only") { page = .reset }
             Tile(icon: dev.offline ? "wifi.slash" : "wifi", name: "Network",
                  detail: dev.offline ? "off" : (dev.netDown ? "no signal" : "on")) { page = .network }
+            Tile(icon: "hand.point.up.left", name: "Gestures",
+                 detail: ges.on ? "on" : "off") { page = .gesture }
             Tile(icon: "bicycle", name: "Vehicle",
                  detail: dev.bike ? (Device.bikeTemplates[safe: dev.btpl] ?? "on") : "off") { page = .vehicle }
         }
@@ -264,6 +268,9 @@ struct RobotSettings: View {
 
         case .vehicle:
             VehiclePane()
+
+        case .gesture:
+            GesturePane()
 
         case .firmware:
             VStack(alignment: .leading, spacing: 9) {
@@ -542,5 +549,204 @@ struct VehiclePane: View {
             Text(label).font(.system(size: 11)).frame(width: 86, alignment: .leading)
             TextField("", text: v).textFieldStyle(.roundedBorder).font(.system(size: 11))
         }
+    }
+}
+
+// ================================================================
+//  GESTURE MODE
+// ================================================================
+//  Switched on here, and only here. The robot does not remember it:
+//  it comes up as a robot, this app tells it otherwise when it finds
+//  it, and it drops the mode the moment this app stops answering. So
+//  quitting Rafiq gives you your robot back, and so does holding the
+//  pad for four seconds.
+struct GesturePane: View {
+    @EnvironmentObject var dev: Device
+    @ObservedObject private var g = Gestures.shared
+    @State private var picking: UUID?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Toggle(isOn: $g.on) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Gesture mode").font(.system(size: 12))
+                    Text("The pad drives this Mac instead of the robot")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch).controlSize(.small)
+            .disabled(dev.reachable != true)
+
+            if !g.lastSaid.isEmpty {
+                Label(g.lastSaid, systemImage: "hand.tap")
+                    .font(.system(size: 10)).foregroundStyle(Color.accentColor)
+            }
+
+            if g.on {
+                Divider()
+                Toggle(isOn: $g.micTakesOver) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("While the mic is live").font(.system(size: 12))
+                        Text("One press kills the mic and the camera, two brings the mic back. "
+                             + "Turning a camera back on is yours.")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch).controlSize(.small)
+
+                if !Keys.trusted {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Opening apps and running Shortcuts work now. Pressing keys, "
+                              + "and switching a camera off, need Accessibility.",
+                              systemImage: "lock")
+                            .font(.system(size: 10)).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Open Accessibility settings") { Keys.openSettings() }
+                            .font(.system(size: 10)).buttonStyle(.plain)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+
+                Divider()
+                Text(front).font(.system(size: 10)).foregroundStyle(.secondary)
+
+                ForEach($g.maps) { $m in
+                    MapRow(map: $m, onDrop: { g.maps.removeAll { $0.id == m.id } })
+                }
+                Button { g.maps.append(GMap(bundleId: frontId)) } label: {
+                    Label(addLabel, systemImage: "plus.circle")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                .disabled(frontId == nil || g.maps.contains { $0.bundleId == frontId })
+            }
+        }
+    }
+
+    private var frontId: String? { g.frontApp.isEmpty ? nil : g.frontApp }
+    private var front: String {
+        guard let f = frontId else { return "Nothing in front" }
+        return "In front: " + (GAction.appName(f) ?? f)
+    }
+    private var addLabel: String {
+        guard let f = frontId else { return "Add the app in front" }
+        if g.maps.contains(where: { $0.bundleId == f }) { return "Already set up" }
+        return "Add " + (GAction.appName(f) ?? f)
+    }
+}
+
+/// One application's pair of presses.
+struct MapRow: View {
+    @Binding var map: GMap
+    let onDrop: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(map.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                Spacer()
+                if map.bundleId != nil {
+                    Button { onDrop() } label: {
+                        Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                }
+            }
+            ActionPicker(title: "One press", action: $map.one)
+            ActionPicker(title: "Two presses", action: $map.two)
+        }
+        .padding(7)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color.primary.opacity(0.05)))
+    }
+}
+
+/// Nothing, an app, a Shortcut, or keys. The first three need no
+/// permission at all; only the last one does.
+struct ActionPicker: View {
+    let title: String
+    @Binding var action: GAction
+    @State private var text = ""
+
+    private enum Kind: String, CaseIterable { case nothing, app, shortcut, keys
+        var label: String {
+            switch self {
+            case .nothing: return "Nothing"
+            case .app:     return "Open app"
+            case .shortcut:return "Shortcut"
+            case .keys:    return "Keys"
+            }
+        }
+    }
+    private var kind: Kind {
+        switch action {
+        case .nothing:  return .nothing
+        case .openApp:  return .app
+        case .shortcut: return .shortcut
+        case .keys:     return .keys
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title).font(.system(size: 10)).foregroundStyle(.secondary)
+                .frame(width: 74, alignment: .leading)
+            Picker("", selection: Binding(get: { kind }, set: { set($0) })) {
+                ForEach(Kind.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .labelsHidden().frame(width: 96)
+            if kind == .app {
+                Button(pickLabel) { pickApp() }
+                    .font(.system(size: 10)).buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+            } else if kind != .nothing {
+                TextField(kind == .keys ? "cmd+shift+a" : "Shortcut name", text: $text)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 10))
+                    .onSubmit(commit)
+                    .onChange(of: text) { _, _ in commit() }
+            }
+            Spacer(minLength: 0)
+        }
+        .onAppear {
+            switch action {
+            case .shortcut(let n): text = n
+            case .keys(let k):     text = k
+            default:               text = ""
+            }
+        }
+    }
+
+    private var pickLabel: String {
+        if case .openApp(let b) = action, !b.isEmpty {
+            return GAction.appName(b) ?? b
+        }
+        return "Choose…"
+    }
+
+    private func set(_ k: Kind) {
+        switch k {
+        case .nothing:  action = .nothing
+        case .app:      action = .openApp("")
+        case .shortcut: action = .shortcut(text)
+        case .keys:     action = .keys(text)
+        }
+    }
+    private func commit() {
+        switch kind {
+        case .shortcut: action = .shortcut(text)
+        case .keys:     action = .keys(text)
+        default:        break
+        }
+    }
+    private func pickApp() {
+        let p = NSOpenPanel()
+        p.allowedContentTypes = [.application]
+        p.directoryURL = URL(fileURLWithPath: "/Applications")
+        p.allowsMultipleSelection = false
+        guard p.runModal() == .OK, let u = p.url,
+              let b = Bundle(url: u)?.bundleIdentifier else { return }
+        action = .openApp(b)
     }
 }
