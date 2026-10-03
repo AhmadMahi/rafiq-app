@@ -3,7 +3,7 @@
 set -euo pipefail
 NAME="Rafiq"
 APP="build/$NAME.app"
-VER="3.3.0"
+VER="3.3.1"
 
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
@@ -44,9 +44,35 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 
-# arm64 binaries must carry at least an ad hoc signature to run at all
-codesign --force --sign - --timestamp=none "$APP" 2>/dev/null
-codesign --verify --deep --strict "$APP" && echo "signed (ad hoc)"
+# arm64 binaries must carry at least an ad hoc signature to run at all,
+# and this one needs rather more than that.
+#
+# Ad hoc signing hashes the code, so the signature changes on every
+# build. macOS ties a permission grant to the signature, which meant
+# Accessibility had to be granted again after every single update. A
+# certificate of our own hashes the certificate instead, and that does
+# not change, so the grant survives.
+#
+#   signed with the certificate:  identifier in.iotcart.rafiq and
+#                                 certificate leaf = H"e813..."
+#   signed ad hoc:                cdhash H"61bb..."   <- new every build
+#
+# Nothing needs the certificate to be trusted. codesign only needs the
+# key; the "not trusted" that `security find-identity -v` complains
+# about is about verifying a chain, which nobody is asking it to do.
+IDENT="Rafiq Signing"
+if security find-identity -p codesigning 2>/dev/null | grep -q "$IDENT"; then
+  codesign --force --sign "$IDENT" --timestamp=none "$APP"
+  echo "signed as $IDENT"
+else
+  # Another machine, or the certificate gone. Still builds, but the
+  # permissions will come loose again, so it says so rather than
+  # quietly going back to the old behaviour.
+  codesign --force --sign - --timestamp=none "$APP" 2>/dev/null
+  echo "WARNING: no \"$IDENT\" certificate, falling back to ad hoc."
+  echo "         Permissions will need granting again after each update."
+fi
+codesign --verify --deep --strict "$APP" && echo "signature verified"
 
 # --- the disk image ---
 STAGE="build/stage"
