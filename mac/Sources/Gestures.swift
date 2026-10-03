@@ -225,7 +225,7 @@ final class Gestures: ObservableObject {
         var did = "mic off"
         if let app = Calls.known(frontApp), Keys.trusted {
             if Keys.press(app.mic) { did += ", told \(app.name)" }
-            if Keys.press(app.cam) { did += " and the camera" }
+            if !app.cam.isEmpty, Keys.press(app.cam) { did += " and the camera" }
         } else if Calls.known(frontApp) != nil {
             did += ", camera needs Accessibility"
         }
@@ -278,17 +278,42 @@ final class Gestures: ObservableObject {
 // ================================================================
 enum Calls {
     struct App { let name: String; let mic: String; let cam: String }
+
+    /// The applications we know how to tell as well as silencing the
+    /// device. The device mute happens for every application there
+    /// is; this only adds the part where the meeting sees you muted
+    /// instead of only hearing nothing.
+    ///
+    /// WhatsApp is here because it was asked for. I am less sure of
+    /// its shortcut than of the others, and if it turns out to be
+    /// wrong the microphone still goes off, because that half never
+    /// depended on the application at all.
     static let table: [String: App] = [
-        "us.zoom.xos":          App(name: "Zoom",  mic: "cmd+shift+a", cam: "cmd+shift+v"),
-        "com.microsoft.teams":  App(name: "Teams", mic: "cmd+shift+m", cam: "cmd+shift+o"),
-        "com.microsoft.teams2": App(name: "Teams", mic: "cmd+shift+m", cam: "cmd+shift+o"),
-        // Meet lives in a browser and we cannot see the tab, so this
-        // is the browser's key and it is only right when Meet is the
+        "us.zoom.xos":            App(name: "Zoom",   mic: "cmd+shift+a", cam: "cmd+shift+v"),
+        "com.microsoft.teams":    App(name: "Teams",  mic: "cmd+shift+m", cam: "cmd+shift+o"),
+        "com.microsoft.teams2":   App(name: "Teams",  mic: "cmd+shift+m", cam: "cmd+shift+o"),
+        // Meet and anything else in a tab: we can see the browser but
+        // not the tab, so this is right only while the meeting is the
         // tab you are looking at.
-        "com.google.Chrome":    App(name: "Meet",  mic: "cmd+d",       cam: "cmd+e"),
-        "com.apple.Safari":     App(name: "Meet",  mic: "cmd+d",       cam: "cmd+e"),
+        "com.google.Chrome":      App(name: "Meet",   mic: "cmd+d",       cam: "cmd+e"),
+        "com.apple.Safari":       App(name: "Meet",   mic: "cmd+d",       cam: "cmd+e"),
+        "net.whatsapp.WhatsApp":  App(name: "WhatsApp", mic: "cmd+shift+m", cam: "cmd+shift+v"),
+        "com.tinyspeck.slackmacgap": App(name: "Slack", mic: "cmd+shift+space", cam: ""),
     ]
     static func known(_ bundleId: String) -> App? { table[bundleId] }
+
+    /// For the menu of apps worth adding, most likely first.
+    static let order = ["us.zoom.xos", "com.microsoft.teams", "net.whatsapp.WhatsApp",
+                        "com.tinyspeck.slackmacgap", "com.google.Chrome",
+                        "com.apple.Safari", "com.apple.Music", "com.apple.Notes",
+                        "com.apple.iCal", "com.apple.Terminal"]
+
+    static var names: String {
+        var seen: [String] = []
+        for id in order { if let a = table[id], !seen.contains(a.name) { seen.append(a.name) } }
+        return "Told as well as silenced: " + seen.joined(separator: ", ")
+            + ". Everything else is silenced at the device, which works regardless."
+    }
 }
 
 // ================================================================

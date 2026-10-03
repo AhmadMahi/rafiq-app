@@ -66,6 +66,7 @@ struct RafiqBarApp: App {
 struct Panel: View {
     @EnvironmentObject var dev: Device
     @EnvironmentObject var svc: Services
+    @ObservedObject private var ges = Gestures.shared
 
     @State private var draft = ""
     @State private var showSettings = false
@@ -377,8 +378,16 @@ struct Panel: View {
             }
 
             // row four
-            Tile(icon: "arrow.down.circle", name: "Update", detail: "the robot") {
-                Task { await dev.checkUpdate() }
+            //
+            // Gestures sits here and Update has gone into the robot's
+            // settings. Update is something you do now and then and
+            // this is something you switch on and off, and a grid you
+            // glance at should be made of the second kind.
+            Tile(icon: "hand.tap", name: "Gestures",
+                 detail: ges.on ? (ges.micLive ? (ges.muted ? "muted" : "on a call") : "on")
+                                : "off",
+                 on: ges.on, enabled: dev.reachable == true) {
+                ges.on.toggle()
             }
             Tile(icon: "moon.zzz", name: "Deep sleep",
                  detail: dev.blocked(.deepSleep) ?? "power to wake",

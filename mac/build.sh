@@ -3,7 +3,7 @@
 set -euo pipefail
 NAME="Rafiq"
 APP="build/$NAME.app"
-VER="3.3.1"
+VER="3.4.0"
 
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 

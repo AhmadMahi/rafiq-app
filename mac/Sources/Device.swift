@@ -136,6 +136,26 @@ final class Device: ObservableObject {
     var focusRunning: Bool { focusLeft > 0 }
     var breakRunning: Bool { dndLeft > 0 }
 
+    // ---------------------------------------------------------------
+    //  not letting a poll undo what you just did
+    // ---------------------------------------------------------------
+    //  The panel asks the robot how it is every ten seconds, and that
+    //  answer describes the robot as it was when the request left. Tap
+    //  a tile while one of those is in flight and the reply lands
+    //  afterwards carrying the old value, which puts the tile straight
+    //  back. It read as the first tap not registering: you tapped
+    //  Follow, the robot started following, and the tile stayed dark
+    //  until you tapped it again.
+    //
+    //  So a local change is believed for a moment. Anything the robot
+    //  says about the switches in that window is a stale answer to a
+    //  question asked before the change, and is dropped. Readings the
+    //  robot owns outright, the battery and the countdowns, are never
+    //  affected.
+    private var trustLocalUntil = Date.distantPast
+    private func justChanged() { trustLocalUntil = Date().addingTimeInterval(2.5) }
+    private var pollMayWrite: Bool { Date() >= trustLocalUntil }
+
     /// Nil when the tile is free to use, otherwise the reason it is not.
     /// A greyed out tile with no explanation is just a broken tile.
     func blocked(_ what: Tool) -> String? {
@@ -210,11 +230,13 @@ final class Device: ObservableObject {
     }
 
     func setRelax(_ on: Bool) async {
+        relaxing = on; justChanged()   // believed at once, see trustLocalUntil
         await run("/api/relax", ["a": on ? "1" : "0"], say: on ? "Resting" : "Back to normal")
         relaxing = on
     }
 
     func setFollow(_ on: Bool) async {
+        following = on; justChanged()   // believed at once, see trustLocalUntil
         await run("/api/follow", ["a": on ? "1" : "0"], say: on ? "Watching the pointer" : "Eyes off")
         following = on
     }
@@ -252,24 +274,27 @@ final class Device: ObservableObject {
     func setTap(_ i: Int)        async { await run("/api/tap", ["n": String(i)], say: "Tap strength set") }
     func setDeepSleep(_ on: Bool) async {
         await run("/api/deep", ["off": on ? "0" : "1"], say: nil)
-        deepOff = !on
+        deepOff = !on; justChanged()
     }
     func reboot() async { await run("/api/reboot", [:], say: "Rebooting") }
 
     func setAutoUpdate(_ on: Bool) async {
         await run("/api/autoup", ["a": on ? "1" : "0"], say: nil)
-        autoUp = on
+        autoUp = on; justChanged()
     }
 
     func setOffline(_ on: Bool) async {
+        offline = on; justChanged()   // believed at once, see trustLocalUntil
         await run("/api/cfgv", ["k": "offl", "v": on ? "1" : "0"], say: nil)
         offline = on
     }
     func setBike(_ on: Bool) async {
+        bike = on; justChanged()   // believed at once, see trustLocalUntil
         await run("/api/cfgv", ["k": "bike", "v": on ? "1" : "0"], say: nil)
         bike = on
     }
     func setBikeTemplate(_ i: Int) async {
+        btpl = i; justChanged()
         await run("/api/cfgv", ["k": "btpl", "v": String(i)], say: nil)
         btpl = i
     }
@@ -279,6 +304,7 @@ final class Device: ObservableObject {
     }
 
     func setShake(_ on: Bool) async {
+        shake = on; justChanged()   // believed at once, see trustLocalUntil
         await run("/api/cfgv", ["k": "shake", "v": on ? "1" : "0"], say: nil)
         shake = on
     }
@@ -379,11 +405,13 @@ final class Device: ObservableObject {
     /// it is on, so a robot that restarts comes back into the mode by
     /// itself, and dropped the moment this app stops answering.
     func setGesture(_ on: Bool) async {
+        gesture = on; justChanged()   // believed at once, see trustLocalUntil
         await run("/api/cfgv", ["k": "gest", "v": on ? "1" : "0"], say: nil)
         gesture = on
     }
 
     func setKnock(_ on: Bool) async {
+        knock = on; justChanged()   // believed at once, see trustLocalUntil
         await run("/api/cfgv", ["k": "knock", "v": on ? "1" : "0"], say: nil)
         knock = on
     }
@@ -506,21 +534,27 @@ final class Device: ObservableObject {
             }
             paired    = Self.jsonBool(s, "paired")
             linked    = Self.jsonBool(s, "linked")
-            following = Self.jsonBool(s, "follow")
-            relaxing  = Self.jsonBool(s, "relax")
+            if pollMayWrite {
+                following = Self.jsonBool(s, "follow")
+                relaxing  = Self.jsonBool(s, "relax")
+            }
             focusLeft = Self.jsonInt(s, "focusLeft")
             dndLeft   = Self.jsonInt(s, "dndLeft")
             version   = Self.jsonString(s, "fw") ?? version
             intWired  = Self.jsonBool(s, "intWired")
-            gesture   = Self.jsonBool(s, "gesture")
-            deepOff   = Self.jsonBool(s, "deepOff")
-            autoUp    = Self.jsonBool(s, "autoUp")
-            knock     = Self.jsonBool(s, "knock")
-            shake     = Self.jsonBool(s, "shake")
-            offline   = Self.jsonBool(s, "offline")
             netDown   = Self.jsonBool(s, "netDown")
-            bike      = Self.jsonBool(s, "bike")
-            btpl      = Self.jsonInt(s, "btpl")
+            // Everything below is a switch you can throw from here, so
+            // a reply that left before you threw it is not news.
+            if pollMayWrite {
+                gesture = Self.jsonBool(s, "gesture")
+                deepOff = Self.jsonBool(s, "deepOff")
+                autoUp  = Self.jsonBool(s, "autoUp")
+                knock   = Self.jsonBool(s, "knock")
+                shake   = Self.jsonBool(s, "shake")
+                offline = Self.jsonBool(s, "offline")
+                bike    = Self.jsonBool(s, "bike")
+                btpl    = Self.jsonInt(s, "btpl")
+            }
             plate     = Self.jsonString(s, "plate") ?? plate
             make      = Self.jsonString(s, "make") ?? make
             model     = Self.jsonString(s, "model") ?? model

@@ -109,8 +109,12 @@ struct RobotSettings: View {
                  detail: "settings only") { page = .reset }
             Tile(icon: dev.offline ? "wifi.slash" : "wifi", name: "Network",
                  detail: dev.offline ? "off" : (dev.netDown ? "no signal" : "on")) { page = .network }
-            Tile(icon: "hand.point.up.left", name: "Gestures",
+            Tile(icon: "hand.tap", name: "Gestures",
                  detail: ges.on ? "on" : "off") { page = .gesture }
+            Tile(icon: "arrow.down.circle", name: "Update",
+                 detail: dev.version.isEmpty ? "the robot" : dev.version) {
+                Task { await dev.checkUpdate() }
+            }
             Tile(icon: "bicycle", name: "Vehicle",
                  detail: dev.bike ? (Device.bikeTemplates[safe: dev.btpl] ?? "on") : "off") { page = .vehicle }
         }
@@ -563,77 +567,108 @@ struct VehiclePane: View {
 struct GesturePane: View {
     @EnvironmentObject var dev: Device
     @ObservedObject private var g = Gestures.shared
-    @State private var picking: UUID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Toggle(isOn: $g.on) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Gesture mode").font(.system(size: 12))
-                    Text("The pad drives this Mac instead of the robot")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .toggleStyle(.switch).controlSize(.small)
-            .disabled(dev.reachable != true)
+        VStack(alignment: .leading, spacing: 10) {
 
-            if !g.lastSaid.isEmpty {
-                Label(g.lastSaid, systemImage: "hand.tap")
-                    .font(.system(size: 10)).foregroundStyle(Color.accentColor)
+            // ---- the switch, with its state on the right where the
+            // ---- rest of the app puts it
+            Row(title: "Gesture mode",
+                note: "Knock the desk and the robot sends it here. "
+                    + "It rests dark and will not switch off while this is on.") {
+                Toggle("", isOn: $g.on)
+                    .toggleStyle(.switch).controlSize(.small).labelsHidden()
+                    .disabled(dev.reachable != true)
             }
 
             if g.on {
-                Divider()
-                Toggle(isOn: $g.micTakesOver) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("While the mic is live").font(.system(size: 12))
-                        Text("One press kills the mic and the camera, two brings the mic back. "
-                             + "Turning a camera back on is yours.")
-                            .font(.system(size: 10)).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 5) {
+                    Circle().fill(g.micLive ? Color.orange : Color.green)
+                        .frame(width: 6, height: 6)
+                    Text(status).font(.system(size: 10)).foregroundStyle(.secondary)
+                    Spacer()
+                    if !g.lastSaid.isEmpty {
+                        Text(g.lastSaid).font(.system(size: 10))
+                            .foregroundStyle(Color.accentColor).lineLimit(1)
                     }
                 }
-                .toggleStyle(.switch).controlSize(.small)
+
+                Group2(title: "On a call") {
+                    Row(title: "Take over the knocks",
+                        note: "One knock stops the mic and the camera, two brings the mic "
+                            + "back. Turning a camera on again is yours.") {
+                        Toggle("", isOn: $g.micTakesOver)
+                            .toggleStyle(.switch).controlSize(.small).labelsHidden()
+                    }
+                    Text(Calls.names)
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 if !Keys.trusted {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("Opening apps and running Shortcuts work now. Pressing keys, "
-                              + "and switching a camera off, need Accessibility.",
-                              systemImage: "lock")
-                            .font(.system(size: 10)).foregroundStyle(.orange)
+                    Group2(title: "Permission") {
+                        Text("Opening apps and running Shortcuts work now. Pressing keys, "
+                             + "and switching a camera off, need Accessibility.")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Button("Open Accessibility settings") { Keys.openSettings() }
-                            .font(.system(size: 10)).buttonStyle(.plain)
-                            .foregroundStyle(Color.accentColor)
+                        HStack {
+                            Spacer()
+                            Button("Open settings") { Keys.openSettings() }
+                        }
                     }
                 }
 
-                Divider()
-                Text(front).font(.system(size: 10)).foregroundStyle(.secondary)
-
-                ForEach($g.maps) { $m in
-                    MapRow(map: $m, onDrop: { g.maps.removeAll { $0.id == m.id } })
+                Group2(title: "What a knock does") {
+                    ForEach($g.maps) { $m in
+                        MapRow(map: $m, onDrop: { g.maps.removeAll { $0.id == m.id } })
+                    }
+                    Menu {
+                        ForEach(available, id: \.0) { id, name in
+                            Button(name) { g.maps.append(GMap(bundleId: id)) }
+                        }
+                        Divider()
+                        Button("Choose an app…") { pickApp() }
+                    } label: {
+                        Label("Add an app", systemImage: "plus.circle")
+                            .font(.system(size: 11))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .frame(maxWidth: 130)
                 }
-                Button { g.maps.append(GMap(bundleId: frontId)) } label: {
-                    Label(addLabel, systemImage: "plus.circle")
-                        .font(.system(size: 11))
-                }
-                .buttonStyle(.plain).foregroundStyle(Color.accentColor)
-                .disabled(frontId == nil || g.maps.contains { $0.bundleId == frontId })
             }
         }
     }
 
-    private var frontId: String? { g.frontApp.isEmpty ? nil : g.frontApp }
-    private var front: String {
-        guard let f = frontId else { return "Nothing in front" }
-        return "In front: " + (GAction.appName(f) ?? f)
+    private var status: String {
+        if !g.micLive { return front }
+        return g.muted ? "On a call, muted" : "On a call, live"
     }
-    private var addLabel: String {
-        guard let f = frontId else { return "Add the app in front" }
-        if g.maps.contains(where: { $0.bundleId == f }) { return "Already set up" }
-        return "Add " + (GAction.appName(f) ?? f)
+    private var front: String {
+        g.frontApp.isEmpty ? "Nothing in front"
+            : "In front: " + (GAction.appName(g.frontApp) ?? g.frontApp)
+    }
+
+    /// The ones worth offering first: what is in front of you, the
+    /// apps people take calls in, and whatever else is installed.
+    private var available: [(String, String)] {
+        var out: [(String, String)] = []
+        var seen = Set(g.maps.compactMap(\.bundleId))
+        func add(_ id: String) {
+            guard !seen.contains(id), let n = GAction.appName(id) else { return }
+            seen.insert(id); out.append((id, n))
+        }
+        if !g.frontApp.isEmpty { add(g.frontApp) }
+        for id in Calls.order { add(id) }
+        return out
+    }
+
+    private func pickApp() {
+        let p = NSOpenPanel()
+        p.allowedContentTypes = [.application]
+        p.directoryURL = URL(fileURLWithPath: "/Applications")
+        guard p.runModal() == .OK, let u = p.url,
+              let b = Bundle(url: u)?.bundleIdentifier else { return }
+        if !g.maps.contains(where: { $0.bundleId == b }) { g.maps.append(GMap(bundleId: b)) }
     }
 }
 
