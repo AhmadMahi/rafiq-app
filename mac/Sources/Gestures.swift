@@ -77,8 +77,16 @@ final class Gestures: ObservableObject {
 
     /// The user's own Shortcuts, read from the Shortcuts app rather
     /// than typed from memory. Nobody remembers the exact name.
-    @Published private(set) var shortcuts: [String] = []
+    ///
+    /// Grouped by folder. A flat list is technically complete and
+    /// practically useless: sixty of them in one menu, alphabetical,
+    /// and the half dozen you made for this Mac are scattered through
+    /// the ones that belong on a phone. They were always in the list.
+    /// You could not find them.
+    struct Folder: Identifiable { let id = UUID(); let name: String; let items: [String] }
+    @Published private(set) var folders: [Folder] = []
     @Published private(set) var readingShortcuts = false
+    var shortcuts: [String] { folders.flatMap(\.items) }
 
     /// What the mic is doing, as far as we have set it.
     @Published private(set) var muted = false
@@ -282,28 +290,42 @@ final class Gestures: ObservableObject {
         guard !readingShortcuts else { return }
         readingShortcuts = true
         Task.detached {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
-            p.arguments = ["list"]
-            let pipe = Pipe()
-            p.standardOutput = pipe
-            p.standardError = Pipe()
-            var names: [String] = []
-            do {
-                try p.run()
+            func run(_ args: [String]) -> [String] {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
+                p.arguments = args
+                let pipe = Pipe()
+                p.standardOutput = pipe
+                p.standardError = Pipe()
+                do { try p.run() } catch { return [] }
                 let d = pipe.fileHandleForReading.readDataToEndOfFile()
                 p.waitUntilExit()
-                names = (String(data: d, encoding: .utf8) ?? "")
-                    .split(separator: "\n").map(String.init)
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                return (String(data: d, encoding: .utf8) ?? "")
+                    .split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty }
-                    .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-            } catch {
-                NSLog("could not read the shortcuts: \(error)")
             }
-            let got = names
+            func sorted(_ a: [String]) -> [String] {
+                a.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            }
+
+            var out: [Folder] = []
+            // Folders first, because the one you made for this Mac is
+            // the one you are looking for.
+            for f in sorted(run(["list", "--folders"])) {
+                let items = sorted(run(["list", "--folder-name", f]))
+                if !items.isEmpty { out.append(Folder(name: f, items: items)) }
+            }
+            let loose = sorted(run(["list", "--folder-name", "none"]))
+            if !loose.isEmpty { out.append(Folder(name: "No folder", items: loose)) }
+            // If the folder calls came back with nothing at all, fall
+            // back to the flat list rather than showing an empty menu.
+            if out.isEmpty {
+                let all = sorted(run(["list"]))
+                if !all.isEmpty { out = [Folder(name: "All", items: all)] }
+            }
+            let got = out
             await MainActor.run {
-                self.shortcuts = got
+                self.folders = got
                 self.readingShortcuts = false
             }
         }
@@ -452,6 +474,26 @@ enum Keys {
         "f7": 98, "f8": 100, "f9": 101, "f10": 109, "f11": 103, "f12": 111,
     ]
 
+    /// The other way round, for the recorder: a key code back to the
+    /// word this writes it with.
+    static func name(for code: CGKeyCode) -> String? {
+        codes.first { $0.value == code }?.key
+    }
+
+    /// What an event means, in the same words press() reads. Nil when
+    /// it is a key this cannot send, which is better said than
+    /// recorded and quietly ignored later.
+    static func spec(from e: NSEvent) -> String? {
+        guard let k = name(for: CGKeyCode(e.keyCode)) else { return nil }
+        var parts: [String] = []
+        if e.modifierFlags.contains(.control) { parts.append("ctrl") }
+        if e.modifierFlags.contains(.option)  { parts.append("alt") }
+        if e.modifierFlags.contains(.shift)   { parts.append("shift") }
+        if e.modifierFlags.contains(.command) { parts.append("cmd") }
+        parts.append(k)
+        return parts.joined(separator: "+")
+    }
+
     /// "cmd+shift+a" and the like. Returns false if it cannot read it
     /// or has not been allowed to press anything.
     @discardableResult
@@ -464,7 +506,7 @@ enum Keys {
             case "cmd", "command": flags.insert(.maskCommand)
             case "shift":          flags.insert(.maskShift)
             case "alt", "option":  flags.insert(.maskAlternate)
-            case "ctrl", "control":flags.insert(.maskControl)
+            case "ctrl", "control": flags.insert(.maskControl)
             case "fn":             flags.insert(.maskSecondaryFn)
             case let k:            code = codes[k]
             }

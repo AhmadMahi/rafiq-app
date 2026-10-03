@@ -758,13 +758,22 @@ struct ActionPicker: View {
                 // remembers the exact name of a shortcut, and a name
                 // that is one character out fails silently.
                 Menu {
-                    if g.shortcuts.isEmpty {
+                    if g.folders.isEmpty {
                         Text(g.readingShortcuts ? "Reading…" : "No shortcuts found")
                     }
-                    ForEach(g.shortcuts, id: \.self) { n in
-                        Button(n) { action = .shortcut(n); text = n }
+                    // A folder each. Sixty in one flat menu is where
+                    // the handful you made for this Mac go missing.
+                    ForEach(g.folders) { f in
+                        Menu(f.name) {
+                            ForEach(f.items, id: \.self) { n in
+                                Button(n) { action = .shortcut(n); text = n }
+                            }
+                        }
                     }
                     Divider()
+                    Button("Open Shortcuts") {
+                        NSWorkspace.shared.open(URL(string: "shortcuts://")!)
+                    }
                     Button("Reload the list") { g.readShortcuts() }
                 } label: {
                     Text(text.isEmpty ? "Choose a shortcut" : text)
@@ -772,10 +781,8 @@ struct ActionPicker: View {
                 }
                 .menuStyle(.borderlessButton)
             case .keys:
-                TextField("cmd+shift+a", text: $text)
-                    .textFieldStyle(.roundedBorder).font(.system(size: 10))
-                    .onSubmit(commit)
-                    .onChange(of: text) { _, _ in commit() }
+                KeyRecorder(spec: Binding(get: { text },
+                                          set: { text = $0; action = .keys($0) }))
             }
         }
         .onAppear {
@@ -813,5 +820,70 @@ struct ActionPicker: View {
         guard p.runModal() == .OK, let u = p.url,
               let b = Bundle(url: u)?.bundleIdentifier else { return }
         action = .openApp(b)
+    }
+}
+
+
+/// Press the keys instead of spelling them.
+///
+/// Click it and it listens for the next key with whatever modifiers
+/// you are holding, then writes it the way Keys.press reads it. A
+/// local monitor only ever sees events meant for this app, so nothing
+/// here needs Accessibility; that is only wanted later, to send the
+/// keys back out again.
+///
+/// Escape gives up, and a key this cannot send says so rather than
+/// recording something that will quietly do nothing.
+struct KeyRecorder: View {
+    @Binding var spec: String
+    @State private var listening = false
+    @State private var monitor: Any?
+    @State private var complaint = ""
+
+    var body: some View {
+        Button { listening ? stop() : start() } label: {
+            Text(label)
+                .font(.system(size: 10, design: listening ? .default : .monospaced))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 7).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(listening ? AnyShapeStyle(Color.accentColor.opacity(0.18))
+                                    : AnyShapeStyle(Color.primary.opacity(0.07))))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(listening ? Color.accentColor.opacity(0.6) : .clear,
+                                  lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .onDisappear(perform: stop)
+    }
+
+    private var label: String {
+        if !complaint.isEmpty { return complaint }
+        if listening { return "Press the keys…" }
+        return spec.isEmpty ? "Click, then press the keys" : spec
+    }
+
+    private func start() {
+        complaint = ""
+        listening = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
+            if e.keyCode == 53 { stop(); return nil }         // escape: changed my mind
+            if let s = Keys.spec(from: e) {
+                spec = s
+                stop()
+            } else {
+                complaint = "cannot send that key"
+                stop()
+                Task { try? await Task.sleep(nanoseconds: 2_000_000_000)
+                       await MainActor.run { complaint = "" } }
+            }
+            return nil                                        // never typed anywhere
+        }
+    }
+
+    private func stop() {
+        listening = false
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
     }
 }
