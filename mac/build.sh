@@ -3,7 +3,7 @@
 set -euo pipefail
 NAME="Rafiq"
 APP="build/$NAME.app"
-VER="3.6.0"
+VER="4.0.0"
 
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
@@ -39,6 +39,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
        arbitrary loads stay off, so this cannot reach the wider internet. -->
   <key>NSAppTransportSecurity</key>
   <dict><key>NSAllowsLocalNetworking</key><true/></dict>
+  <!-- Bluetooth is how it reaches the robot since firmware 6.0. Without
+       this key macOS stops the app the moment it asks for Bluetooth. -->
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>Rafiq talks to your Rafiq robot over Bluetooth.</string>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Rafiq sends your messages to the clock on your own network.</string>
 </dict></plist>
