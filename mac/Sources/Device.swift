@@ -2,9 +2,10 @@ import Foundation
 import SwiftUI
 import Network
 
-/// Everything that talks to the robot. It serves plain HTTP on the local
-/// network, which is why the bundle asks for local network access and allows
-/// local loads only: nothing here should ever leave the house.
+/// Everything that talks to the robot. Bluetooth first (see RobotLink), since
+/// the robot lives on Bluetooth from firmware 6.0; plain HTTP on the local
+/// network for when it is on WiFi, which is why the bundle still asks for
+/// local network access and allows local loads only.
 @MainActor
 final class Device: ObservableObject {
     static let shared = Device()
@@ -521,7 +522,9 @@ final class Device: ObservableObject {
 
     func refresh() async {
         guard !Device.inert else { return }
-        guard !ip.isEmpty else { reachable = nil; return }
+        if let b = RobotLink.shared.battery { battPct = b }
+        if !RobotLink.shared.firmware.isEmpty { version = RobotLink.shared.firmware }
+        guard !ip.isEmpty else { reachable = RobotLink.shared.connected ? true : nil; return }
         do {
             var req = URLRequest(url: try url("/api/state"))
             req.timeoutInterval = 3
@@ -575,10 +578,56 @@ final class Device: ObservableObject {
             autoTurn = Self.jsonBool(s, "turn")
             nets      = Self.parseNets(s)
         } catch {
-            reachable = false
+            // WiFi not answering is normal now: the robot is on Bluetooth.
+            reachable = RobotLink.shared.connected ? true : false
             linked = false
         }
     }
+
+    // ---------------------------------------------------------------
+    //  Bluetooth: which HTTP calls have a RAFIQ command
+    // ---------------------------------------------------------------
+    //  Firmware 7.3 speaks RAFIQ commands over Bluetooth. Calls with an
+    //  equivalent go that way; the rest (follow, canvas, gestures,
+    //  reminder lists, networks) still need the robot on WiFi until the
+    //  firmware grows channels for them.
+
+    static func bleCommand(_ path: String, _ f: [String: String]) -> String? {
+        switch path {
+        case "/api/msg":       return f["m"].map { "msg: " + $0 }
+        case "/api/toast":     return (f["t"] ?? f["m"]).map { "msg: " + $0 }
+        case "/api/relax":     return f["a"] == "1" ? "relax" : "home"
+        case "/api/deepsleep": return "off"
+        case "/api/reboot":    return "reboot"
+        case "/api/update":    return "update"
+        case "/api/cfgv":
+            guard let k = f["k"], let v = f["v"].flatMap(Int.init) else { return nil }
+            switch k {
+            case "bri":  return "bright \(max(10, v * 100 / 255))"
+            case "face": return "face \(v + 1)"
+            default:     return nil
+            }
+        default: return nil
+        }
+    }
+
+    /// A RAFIQ command straight over Bluetooth, for the things only the
+    /// Bluetooth side knows: the timer, Away, zikr, find.
+    func command(_ c: String, say: String?) {
+        if RobotLink.shared.send(c) { if let say { flash(say) } }
+        else { flash("Not connected over Bluetooth") }
+    }
+    func startTimer(_ m: Int)  { command("timer \(m)", say: "Timer, \(m) min") }
+    func addTimer(_ m: Int)    { command(m >= 0 ? "timer +\(m)" : "timer \(m)", say: nil) }
+    func stopTimer()           { command("home", say: "Timer stopped") }
+    func goAway(_ text: String) {
+        let t = Self.clip(text.replacingOccurrences(of: "\n", with: " "))
+        command(t.isEmpty ? "away" : "away: " + t, say: "Away")
+    }
+    func endAway()             { command("home", say: "Welcome back") }
+    func zikr()                { command("zikr", say: "Zikr") }
+    func findRobot()           { command("find", say: "Rafiq is calling out") }
+    func syncRobot()           { command("sync", say: "Syncing over WiFi") }
 
     // ---------------------------------------------------------------
     //  transport
@@ -592,7 +641,17 @@ final class Device: ObservableObject {
     @discardableResult
     private func run(_ path: String, _ fields: [String: String], say: String?) async -> Bool {
         guard !Device.inert else { return false }
-        guard !ip.isEmpty else { flash("Set the address first"); return false }
+        // Bluetooth, when the robot is there and has a command for it.
+        if RobotLink.shared.connected, let c = Self.bleCommand(path, fields) {
+            let ok = RobotLink.shared.send(c)
+            if ok { reachable = true; if let say { flash(say) } }
+            else if say != nil { flash("Could not reach it") }
+            return ok
+        }
+        guard !ip.isEmpty else {
+            flash(RobotLink.shared.connected ? "That one needs the robot on WiFi" : "Not connected")
+            return false
+        }
         busy = true
         defer { busy = false }
         do {
