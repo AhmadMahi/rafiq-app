@@ -103,10 +103,13 @@ final class Gestures: ObservableObject {
 
     private init() {
         load()
+        // A constant, not a captured weak var: newer compilers refuse a
+        // weak var inside a Task. This object lives as long as the app.
+        let me = self
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
-            object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.readFront() }
+            object: nil, queue: .main) { _ in
+                Task { @MainActor in me.readFront() }
             }
         readFront()
     }
@@ -131,9 +134,10 @@ final class Gestures: ObservableObject {
         guard listener == nil else { return }
         do {
             let l = try NWListener(using: .udp, on: NWEndpoint.Port(rawValue: 4211)!)
-            l.newConnectionHandler = { [weak self] c in
+            let me = self
+            l.newConnectionHandler = { c in
                 c.start(queue: .main)
-                Task { @MainActor in self?.receive(on: c) }
+                Task { @MainActor in me.receive(on: c) }
             }
             l.start(queue: .main)
             listener = l
@@ -143,11 +147,11 @@ final class Gestures: ObservableObject {
     }
 
     private func receive(on c: NWConnection) {
-        c.receiveMessage { [weak self] data, _, _, _ in
+        let me = self
+        c.receiveMessage { data, _, _, _ in
             Task { @MainActor in
-                guard let self else { return }
-                if let d = data, let s = String(data: d, encoding: .utf8) { self.heard(s, from: c) }
-                self.receive(on: c)
+                if let d = data, let s = String(data: d, encoding: .utf8) { me.heard(s, from: c) }
+                me.receive(on: c)
             }
         }
     }
