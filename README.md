@@ -8,6 +8,24 @@ Twelve tiles in four rows: quick phrases, focus, follow the pointer,
 relax, clipboard, breaks, reminders, on a break, camera and mic, robot
 updates, deep sleep, and robot settings.
 
+## 4.0: Bluetooth first
+
+Since firmware 6.0 the robot lives on Bluetooth, so the Mac app now reaches
+it there first (CoreBluetooth, firmware 7.2 or newer), with no address to
+type. macOS asks once to pair. WiFi by address still works, for the times
+the robot is on WiFi and for the features that still need it.
+
+| Over Bluetooth | Still needs the robot on WiFi |
+|---|---|
+| Say something, phrases, Timer, Away, Find, Relax, Zikr, Sync, Sleep, restart, update, brightness, face | Follow the pointer, Gestures, canvas, reminder lists, on a break, camera and mic light, networks |
+
+The second column moves to Bluetooth when the firmware gains the channels
+for it (event, pointer and request channels, planned for firmware 7.4).
+
+The header shows the robot's battery, the timer and Away. The Mac tells
+the robot who it is, so it appears by name in the robot's Devices list
+and can be chosen as Second.
+
 ## Getting it
 
 **macOS** (14 or newer, Apple silicon): download the `.dmg`, drag Rafiq
