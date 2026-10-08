@@ -51,6 +51,9 @@ final class RobotLink: NSObject, ObservableObject {
     /// Firmware 7.4 or newer: everything the app does goes over Bluetooth,
     /// gestures and the pointer included.
     @Published private(set) var full = false
+    /// The robot says 7.4 or newer but this Mac still sees the old
+    /// services: macOS is holding an old list. Settings shows what to do.
+    @Published private(set) var staleHint = false
     private var poll: Timer?
 
     /// The robot this Mac belongs to, once one has been found. Kept so
@@ -280,6 +283,17 @@ extension RobotLink: CBCentralManagerDelegate {
 }
 
 extension RobotLink: CBPeripheralDelegate {
+    /// The robot says its services changed (firmware 7.4.1 says so on
+    /// every link): forget what was found and look again. Without this a
+    /// Mac that paired before an update never sees the new channels.
+    nonisolated func peripheral(_ p: CBPeripheral, didModifyServices invalidated: [CBService]) {
+        MainActor.assumeIsolated {
+            self.full = false
+            self.evtChr = nil; self.ptrChr = nil; self.cfgChr = nil
+            p.discoverServices([RobotLink.uSvc])
+        }
+    }
+
     nonisolated func peripheral(_ p: CBPeripheral, didDiscoverServices error: Error?) {
         MainActor.assumeIsolated {
             guard let s = p.services?.first(where: { $0.uuid == RobotLink.uSvc }) else {
@@ -303,6 +317,7 @@ extension RobotLink: CBPeripheralDelegate {
                 if c.uuid == RobotLink.uCfg  { self.cfgChr = c }
             }
             self.full = self.evtChr != nil && self.ptrChr != nil && self.cfgChr != nil
+            self.staleHint = false
             if self.cmdChr != nil && self.statChr != nil { self.ready() }
             else { self.state = "Rafiq needs firmware 7.2 or newer" }
         }
@@ -321,6 +336,9 @@ extension RobotLink: CBPeripheralDelegate {
             }
             if isStat, let v, let s = String(data: v, encoding: .ascii) {
                 self.stat = RobotLink.parse(s)
+                let parts = (self.stat["fw"] ?? "").split(separator: ".").compactMap { Int($0) }
+                let new = parts.count >= 2 && (parts[0] > 7 || (parts[0] == 7 && parts[1] >= 4))
+                self.staleHint = new && !self.full
                 if self.state != "Connected" { self.state = "Connected" }
             }
             // a knock or a press, in gesture mode

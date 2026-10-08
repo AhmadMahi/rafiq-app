@@ -57,7 +57,6 @@ struct SettingsPane: View {
     @Binding var showing: Bool
 
     @State private var addr = ""
-    @State private var robotUpdate = ""
 
     private let breakChoices = [5, 10, 20, 30, 45, 60, 90]
 
@@ -90,6 +89,14 @@ struct SettingsPane: View {
                         Row(title: "Firmware",
                             note: link.full ? "everything over Bluetooth" : "7.4 brings the rest over Bluetooth") {
                             Text(link.firmware).font(.system(size: 11))
+                        }
+                    }
+                    if link.staleHint {
+                        // The robot is new enough but macOS still lists its old services.
+                        Row(title: "Old Bluetooth list",
+                            note: "System Settings, Bluetooth, Rafiq: Forget This Device. Then come "
+                                + "back here and pair again; everything works after that.") {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                         }
                     }
                     Row(title: "Use WiFi too",
@@ -224,17 +231,11 @@ struct SettingsPane: View {
                             }
                         }
                     }
+                    // The robot updates from a file only (firmware 7.4.1): the
+                    // Update tile in the robot's settings walks through it.
                     Row(title: dev.version.isEmpty ? "Robot firmware" : "Robot \(dev.version)",
-                        note: robotUpdate.isEmpty ? "Asks the robot to look for its own update"
-                                                  : robotUpdate) {
-                        HStack {
-                            Spacer()
-                            Button("Check") {
-                                robotUpdate = "Asked it to look"
-                                Task { await dev.checkUpdate() }
-                            }
-                            .disabled(dev.reachable != true)
-                        }
+                        note: "From a file: the robot's settings, then Update") {
+                        EmptyView()
                     }
                 }
             }
