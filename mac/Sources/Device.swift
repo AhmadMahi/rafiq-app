@@ -177,6 +177,13 @@ final class Device: ObservableObject {
 
     enum Tool { case breakNow, deepSleep, relax, follow }
 
+    /// WiFi as well as Bluetooth. Off by default: Bluetooth reaches
+    /// everything from firmware 7.4, and leaving the robot's WiFi off is
+    /// most of its battery. On, the robot is asked onto WiFi (it turns it
+    /// off itself after ten quiet minutes) and the address is used too.
+    @AppStorage("useWifi") var useWifi: Bool = false
+    private var wifiIp: String { useWifi ? ip : "" }
+
     var token: String {
         get { Keychain.get("token") }
         set { Keychain.set(newValue, for: "token") }
@@ -524,7 +531,7 @@ final class Device: ObservableObject {
         guard !Device.inert else { return }
         if let b = RobotLink.shared.battery { battPct = b }
         if !RobotLink.shared.firmware.isEmpty { version = RobotLink.shared.firmware }
-        guard !ip.isEmpty else { reachable = RobotLink.shared.connected ? true : nil; return }
+        guard !wifiIp.isEmpty else { reachable = RobotLink.shared.connected ? true : nil; return }
         do {
             var req = URLRequest(url: try url("/api/state"))
             req.timeoutInterval = 3
@@ -592,23 +599,91 @@ final class Device: ObservableObject {
     //  reminder lists, networks) still need the robot on WiFi until the
     //  firmware grows channels for them.
 
-    static func bleCommand(_ path: String, _ f: [String: String]) -> String? {
+    /// The Bluetooth form of an HTTP call, as one or more writes. "!"
+    /// commands are the apps' own (firmware 7.4); before that, only the
+    /// calls with a RAFIQ command of their own go over Bluetooth.
+    static func bleCommands(_ path: String, _ f: [String: String], full: Bool) -> [String]? {
+        let us = "\u{1F}"
+        func i(_ k: String) -> Int { Int(f[k] ?? "") ?? 0 }
         switch path {
-        case "/api/msg":       return f["m"].map { "msg: " + $0 }
-        case "/api/toast":     return (f["t"] ?? f["m"]).map { "msg: " + $0 }
-        case "/api/relax":     return f["a"] == "1" ? "relax" : "home"
-        case "/api/deepsleep": return "off"
-        case "/api/reboot":    return "reboot"
-        case "/api/update":    return "update"
+        case "/api/msg":       return f["m"].map { ["msg: " + $0] }
+        case "/api/toast":     return (f["t"] ?? f["m"]).map { ["msg: " + $0] }
+        case "/api/deepsleep": return ["off"]
+        case "/api/reboot":    return ["reboot"]
+        case "/api/update":    return ["update"]
+        case "/api/relax":     return full ? ["!relax \(i("a"))"] : [f["a"] == "1" ? "relax" : "home"]
         case "/api/cfgv":
-            guard let k = f["k"], let v = f["v"].flatMap(Int.init) else { return nil }
+            guard let k = f["k"], let v = Int(f["v"] ?? "") else { return nil }
+            if full { return ["!cfg \(k) \(v)"] }
             switch k {
-            case "bri":  return "bright \(max(10, v * 100 / 255))"
-            case "face": return "face \(v + 1)"
+            case "bri":  return ["bright \(max(10, v * 100 / 255))"]
+            case "face": return ["face \(v + 1)"]
             default:     return nil
             }
-        default: return nil
+        default: break
         }
+        guard full else { return nil }                // the rest needs 7.4
+        switch path {
+        case "/api/follow":  return ["!follow \(i("a"))"]
+        case "/api/dnd":     return ["!dnd \(i("m"))"]
+        case "/api/busy":    return ["!busy \(i("cam")) \(i("mic"))" + (f["muted"].map { " " + $0 } ?? "")]
+        case "/api/tap":     return ["!tap \(i("n"))"]
+        case "/api/deep":    return ["!deep \(i("off"))"]
+        case "/api/autoup":  return ["!autoup \(i("a"))"]
+        case "/api/turn":    return ["!turn \(i("a"))"]
+        case "/api/bike":
+            return ["!bike " + [f["plate"] ?? "", f["make"] ?? "", f["model"] ?? "", f["owner"] ?? ""]
+                .map(Self.clip).joined(separator: us)]
+        case "/api/net":
+            if let d = f["del"] { return ["!net del \(d)"] }
+            if let u = f["up"]  { return ["!net up \(u)"] }
+            guard let ss = f["ssid"], !ss.isEmpty else { return nil }
+            return ["!net add " + ss + us + (f["pass"] ?? "")]
+        case "/api/rems":
+            if f["clear"] == "1" { return ["!remclear"] }
+            // The robot keeps a phone's wall clock over Bluetooth, so the
+            // times go as wall clock too; it works out its own offset.
+            var out: [String] = []
+            for n in 0..<max(0, min(i("n"), 12)) {
+                guard let a = f["a\(n)"].flatMap(TimeInterval.init), let t = f["t\(n)"] else { continue }
+                let d = Date(timeIntervalSince1970: a)
+                let wall = Int(a) + TimeZone.current.secondsFromGMT(for: d)
+                out.append("!rem \(wall) \(f["d\(n)"] == "1" ? 1 : 0) " + Self.clip(t))
+            }
+            return out
+        default:
+            return nil                                // canvas, pairing, the reminder list: WiFi
+        }
+    }
+
+    /// The robot's settings as it reads them out over Bluetooth (7.4),
+    /// with /api/state's own names, read the way /api/state is.
+    func applyBleState(_ s: String) {
+        reachable = true
+        if let v = Self.jsonString(s, "fw") { version = v }
+        following = Self.jsonBool(s, "follow")
+        relaxing  = Self.jsonBool(s, "relax")
+        dndLeft   = Self.jsonInt(s, "dndLeft")
+        intWired  = Self.jsonBool(s, "intWired")
+        if pollMayWrite {
+            gesture = Self.jsonBool(s, "gesture")
+            deepOff = Self.jsonBool(s, "deepOff")
+            autoUp  = Self.jsonBool(s, "autoUp")
+            knock   = Self.jsonBool(s, "knock")
+            shake   = Self.jsonBool(s, "shake")
+            offline = Self.jsonBool(s, "offline")
+            bike    = Self.jsonBool(s, "bike")
+            btpl    = Self.jsonInt(s, "btpl")
+            bri  = Self.jsonInt(s, "bri");  face = Self.jsonInt(s, "face")
+            slpi = Self.jsonInt(s, "slpi"); popi = Self.jsonInt(s, "popi")
+            eye  = Self.jsonInt(s, "eye");  tap  = Self.jsonInt(s, "tap")
+            deepi = Self.jsonInt(s, "deepi")
+            autoTurn = Self.jsonBool(s, "turn")
+        }
+        let b = Self.jsonInt(s, "battPct"); if b >= 0 { battPct = b }
+        if let bf = Self.jsonDouble(s, "battFull") { battFull = bf }
+        netMax = max(1, Self.jsonInt(s, "netMax"))
+        nets   = Self.parseNets(s)
     }
 
     /// A RAFIQ command straight over Bluetooth, for the things only the
@@ -642,14 +717,15 @@ final class Device: ObservableObject {
     private func run(_ path: String, _ fields: [String: String], say: String?) async -> Bool {
         guard !Device.inert else { return false }
         // Bluetooth, when the robot is there and has a command for it.
-        if RobotLink.shared.connected, let c = Self.bleCommand(path, fields) {
-            let ok = RobotLink.shared.send(c)
-            if ok { reachable = true; if let say { flash(say) } }
+        if RobotLink.shared.connected, let cs = Self.bleCommands(path, fields, full: RobotLink.shared.full) {
+            var ok = !cs.isEmpty
+            for c in cs { ok = RobotLink.shared.send(c) && ok }
+            if ok { reachable = true; trustLocalUntil = Date().addingTimeInterval(4); if let say { flash(say) } }
             else if say != nil { flash("Could not reach it") }
             return ok
         }
-        guard !ip.isEmpty else {
-            flash(RobotLink.shared.connected ? "That one needs the robot on WiFi" : "Not connected")
+        guard !wifiIp.isEmpty else {
+            flash(RobotLink.shared.connected ? "That one needs WiFi (Settings)" : "Not connected")
             return false
         }
         busy = true
@@ -765,10 +841,12 @@ final class Cursor {
     func start(host: String) {
         stop()
         self.host = host
-        guard let p = NWEndpoint.Port(rawValue: 4210) else { return }
-        let c = NWConnection(host: NWEndpoint.Host(host), port: p, using: .udp)
-        c.start(queue: .global(qos: .utility))
-        conn = c
+        // With no address the pointer goes over Bluetooth only (see tick).
+        if !host.isEmpty, let p = NWEndpoint.Port(rawValue: 4210) {
+            let c = NWConnection(host: NWEndpoint.Host(host), port: p, using: .udp)
+            c.start(queue: .global(qos: .utility))
+            conn = c
+        }
         timer = Timer.every(0.1) { [weak self] in
             Task { @MainActor in self?.tick() }
         }
@@ -780,7 +858,6 @@ final class Cursor {
     }
 
     private func tick() {
-        guard let conn else { return }
         let p = NSEvent.mouseLocation
         // The screen the pointer is actually on, so a second monitor does
         // not send the eyes hard over to one side and leave them there.
@@ -791,6 +868,8 @@ final class Cursor {
         // the top of the monitor, so this is flipped.
         let ny = 1 - Float((p.y - f.minY) / f.height) * 2
         let msg = "\(Int(nx * 1000)) \(Int(ny * 1000))"
-        conn.send(content: msg.data(using: .utf8), completion: .idempotent)
+        // Bluetooth first (firmware 7.4); UDP only when there is no link.
+        if RobotLink.shared.full { RobotLink.shared.pointer(msg); return }
+        conn?.send(content: msg.data(using: .utf8), completion: .idempotent)
     }
 }

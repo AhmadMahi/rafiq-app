@@ -24,6 +24,10 @@ final class RobotLink: NSObject, ObservableObject {
     static let uCmd = CBUUID(string: "52a1f001-7a3e-4b5c-9d6f-0a1b2c3d4e5f")
     static let uTime = CBUUID(string: "52a1f003-7a3e-4b5c-9d6f-0a1b2c3d4e5f")
     static let uStat = CBUUID(string: "52a1f004-7a3e-4b5c-9d6f-0a1b2c3d4e5f")
+    // firmware 7.4: gestures out, the pointer in, the settings read back
+    static let uEvt = CBUUID(string: "52a1f005-7a3e-4b5c-9d6f-0a1b2c3d4e5f")
+    static let uPtr = CBUUID(string: "52a1f006-7a3e-4b5c-9d6f-0a1b2c3d4e5f")
+    static let uCfg = CBUUID(string: "52a1f007-7a3e-4b5c-9d6f-0a1b2c3d4e5f")
     /// The robot also advertises HID, which is how macOS may already
     /// hold a connection to it before this app asks.
     static let uHid = CBUUID(string: "1812")
@@ -38,6 +42,15 @@ final class RobotLink: NSObject, ObservableObject {
     private var cmdChr: CBCharacteristic?
     private var timeChr: CBCharacteristic?
     private var statChr: CBCharacteristic?
+    private var evtChr: CBCharacteristic?
+    private var ptrChr: CBCharacteristic?
+    private var cfgChr: CBCharacteristic?
+    private var lastPtr = ""
+    private var lastPtrAt = Date.distantPast
+
+    /// Firmware 7.4 or newer: everything the app does goes over Bluetooth,
+    /// gestures and the pointer included.
+    @Published private(set) var full = false
     private var poll: Timer?
 
     /// The robot this Mac belongs to, once one has been found. Kept so
@@ -64,6 +77,8 @@ final class RobotLink: NSObject, ObservableObject {
     var quiet: Bool { stat["quiet"] == "1" }
     var guarding: Bool { stat["guard"] == "1" }
     var firmware: String { stat["fw"] ?? "" }
+    var relaxing: Bool { stat["relax"] == "1" }
+    var following: Bool { stat["follow"] == "1" }
 
     // ---------------------------------------------------------------
     //  sending
@@ -88,6 +103,18 @@ final class RobotLink: NSObject, ObservableObject {
     func readStat() {
         guard connected, let p = peripheral, let c = statChr else { return }
         p.readValue(for: c)
+        if let k = cfgChr { p.readValue(for: k) }       // the settings too, on 7.4
+    }
+
+    /// The pointer, "x y" from -1000 to 1000. Only when it moved, or once
+    /// a second so the robot knows it is still being followed: both ends
+    /// stay asleep between, which is most of the time.
+    func pointer(_ msg: String) {
+        guard connected, let p = peripheral, let c = ptrChr else { return }
+        let now = Date()
+        if msg == lastPtr && now.timeIntervalSince(lastPtrAt) < 1 { return }
+        lastPtr = msg; lastPtrAt = now
+        p.writeValue(Data(msg.utf8), for: c, type: .withoutResponse)
     }
 
     /// Forget this robot and look again, for a new one or after a reset.
@@ -153,6 +180,8 @@ final class RobotLink: NSObject, ObservableObject {
 
     private func lost() {
         connected = false
+        full = false
+        evtChr = nil; ptrChr = nil; cfgChr = nil
         poll?.invalidate(); poll = nil
         cmdChr = nil; timeChr = nil; statChr = nil
         state = "Waiting for Rafiq"
@@ -257,7 +286,8 @@ extension RobotLink: CBPeripheralDelegate {
                 self.state = "Rafiq needs firmware 7.2 or newer"
                 return
             }
-            p.discoverCharacteristics([RobotLink.uCmd, RobotLink.uTime, RobotLink.uStat], for: s)
+            p.discoverCharacteristics([RobotLink.uCmd, RobotLink.uTime, RobotLink.uStat,
+                                       RobotLink.uEvt, RobotLink.uPtr, RobotLink.uCfg], for: s)
         }
     }
 
@@ -268,7 +298,11 @@ extension RobotLink: CBPeripheralDelegate {
                 if c.uuid == RobotLink.uCmd  { self.cmdChr = c }
                 if c.uuid == RobotLink.uTime { self.timeChr = c }
                 if c.uuid == RobotLink.uStat { self.statChr = c }
+                if c.uuid == RobotLink.uEvt  { self.evtChr = c; p.setNotifyValue(true, for: c) }
+                if c.uuid == RobotLink.uPtr  { self.ptrChr = c }
+                if c.uuid == RobotLink.uCfg  { self.cfgChr = c }
             }
+            self.full = self.evtChr != nil && self.ptrChr != nil && self.cfgChr != nil
             if self.cmdChr != nil && self.statChr != nil { self.ready() }
             else { self.state = "Rafiq needs firmware 7.2 or newer" }
         }
@@ -288,6 +322,14 @@ extension RobotLink: CBPeripheralDelegate {
             if isStat, let v, let s = String(data: v, encoding: .ascii) {
                 self.stat = RobotLink.parse(s)
                 if self.state != "Connected" { self.state = "Connected" }
+            }
+            // a knock or a press, in gesture mode
+            if c.uuid == RobotLink.uEvt, let v, let s = String(data: v, encoding: .ascii), !s.isEmpty {
+                Gestures.shared.heardBluetooth(s)
+            }
+            // the robot's settings, with /api/state's own names
+            if c.uuid == RobotLink.uCfg, let v, let s = String(data: v, encoding: .utf8) {
+                Device.shared.applyBleState(s)
             }
         }
     }
