@@ -178,6 +178,13 @@ final class Gestures: ObservableObject {
         act(parts[1])
     }
 
+    /// Over Bluetooth (firmware 7.4). The link is bonded and encrypted,
+    /// so there is no word to check and no address to compare.
+    func heardBluetooth(_ which: String) {
+        guard on else { return }
+        act(which)
+    }
+
     // ------------------------------------------------------------
     //  what a press does
     // ------------------------------------------------------------

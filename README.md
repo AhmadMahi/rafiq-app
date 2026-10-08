@@ -15,12 +15,11 @@ it there first (CoreBluetooth, firmware 7.2 or newer), with no address to
 type. macOS asks once to pair. WiFi by address still works, for the times
 the robot is on WiFi and for the features that still need it.
 
-| Over Bluetooth | Still needs the robot on WiFi |
-|---|---|
-| Say something, phrases, Timer, Away, Find, Relax, Zikr, Sync, Sleep, restart, update, brightness, face | Follow the pointer, Gestures, canvas, reminder lists, on a break, camera and mic light, networks |
-
-The second column moves to Bluetooth when the firmware gains the channels
-for it (event, pointer and request channels, planned for firmware 7.4).
+With firmware 7.4 everything goes over Bluetooth: messages, timer, Away,
+settings (read back from the robot), networks, reminders (kept on the robot
+so they fire even with the Mac away), on a break, camera and mic, relax,
+follow the pointer and gestures. WiFi is a switch in Settings, off by
+default; the robot turns its own WiFi off after ten quiet minutes.
 
 The header shows the robot's battery, the timer and Away. The Mac tells
 the robot who it is, so it appears by name in the robot's Devices list

@@ -80,14 +80,30 @@ struct SettingsPane: View {
                 }
                 .buttonStyle(.plain)
 
-                // Bluetooth first: since firmware 6.0 the robot lives there.
-                Group2(title: "Bluetooth") {
-                    Row(title: "Link", note: link.name.isEmpty ? "" : link.name) {
+                // Bluetooth is how it is reached. WiFi is a choice, and off.
+                Group2(title: "Connection") {
+                    Row(title: "Bluetooth", note: link.name.isEmpty ? "" : link.name) {
                         Text(link.state).font(.system(size: 11))
                             .foregroundStyle(link.connected ? Color.green : Color.secondary)
                     }
                     if !link.firmware.isEmpty {
-                        Row(title: "Firmware") { Text(link.firmware).font(.system(size: 11)) }
+                        Row(title: "Firmware",
+                            note: link.full ? "everything over Bluetooth" : "7.4 brings the rest over Bluetooth") {
+                            Text(link.firmware).font(.system(size: 11))
+                        }
+                    }
+                    Row(title: "Use WiFi too",
+                        note: "Turns the robot's WiFi on (off again after ten quiet minutes)") {
+                        HStack {
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { dev.useWifi },
+                                set: { on in
+                                    dev.useWifi = on
+                                    if on { dev.command("wifi", say: "Asking the robot onto WiFi") }
+                                    Task { await dev.refresh() }
+                                })).labelsHidden().toggleStyle(.switch)
+                        }
                     }
                     Row(title: "Robot", note: "after a reset, or for another Rafiq") {
                         Button("Forget and look again") { link.forget() }
@@ -95,8 +111,9 @@ struct SettingsPane: View {
                     }
                 }
 
-                Group2(title: "The robot") {
-                    Row(title: "Address", note: "only while it is on WiFi") {
+                if dev.useWifi {
+                Group2(title: "WiFi") {
+                    Row(title: "Address", note: "SYSTEM on the robot shows it") {
                         HStack(spacing: 6) {
                             TextField("192.168.1.42", text: $addr)
                                 .textFieldStyle(.roundedBorder)
@@ -132,6 +149,8 @@ struct SettingsPane: View {
                             }
                         }
                     }
+                }
+
                 }
 
                 Group2(title: "This Mac") {
@@ -178,8 +197,13 @@ struct SettingsPane: View {
                     }
                 }
 
-                Group2(title: "Reminders over the network") {
-                    EndpointHelp()
+                // Rarely needed, so folded away.
+                DisclosureGroup {
+                    EndpointHelp().padding(.top, 6)
+                } label: {
+                    Text("REMINDERS OVER THE NETWORK")
+                        .font(.system(size: 10, weight: .semibold)).tracking(0.8)
+                        .foregroundStyle(.secondary)
                 }
 
                 Group2(title: "Quick phrases") {

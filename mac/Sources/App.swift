@@ -311,6 +311,9 @@ struct Panel: View {
         }
     }
 
+    /// Everything works: firmware 7.4 over Bluetooth, or WiFi switched on.
+    private var canAll: Bool { link.full || (dev.useWifi && dev.reachable == true) }
+
     private func pill(_ text: String, _ icon: String) -> some View {
         HStack(spacing: 3) {
             Image(systemName: icon).font(.system(size: 8, weight: .semibold))
@@ -368,8 +371,10 @@ struct Panel: View {
                  on: link.timerLeft > 0) {
                 if link.timerLeft > 0 { dev.stopTimer() } else { showFocus = true; closeOthers(except: .focus) }
             }
-            Tile(icon: "door.left.hand.open", name: "Away",
-                 detail: link.away ? "on  ·  end" : "message", on: link.away) {
+            // While away it is the way back: Home, in so many words.
+            Tile(icon: link.away ? "house" : "door.left.hand.open",
+                 name: link.away ? "Home" : "Away",
+                 detail: link.away ? "end Away" : "message", on: link.away) {
                 if link.away { dev.endAway() } else { showAway = true; closeOthers(except: .away) }
             }
             Tile(icon: "dot.radiowaves.left.and.right", name: "Find", detail: "call out",
@@ -387,8 +392,8 @@ struct Panel: View {
                 dev.zikr()
             }
             Tile(icon: "eyes", name: "Follow",
-                 detail: dev.blocked(.follow) ?? "needs WiFi",
-                 on: dev.following, enabled: dev.blocked(.follow) == nil) {
+                 detail: dev.blocked(.follow) ?? (canAll ? "pointer" : "needs 7.4"),
+                 on: dev.following, enabled: dev.blocked(.follow) == nil && canAll) {
                 Task { await dev.setFollow(!dev.following); svc.syncCursor() }
             }
             Tile(icon: "doc.on.clipboard", name: "Clipboard",
@@ -410,12 +415,12 @@ struct Panel: View {
             Tile(icon: "cup.and.saucer", name: "On a break",
                  detail: dev.dndLeft > 0 ? "\(dev.dndLeft / 60 + 1) min left"
                                          : (dev.blocked(.breakNow) ?? "locks Mac"),
-                 on: dev.dndLeft > 0, enabled: dev.blocked(.breakNow) == nil) {
+                 on: dev.dndLeft > 0, enabled: dev.blocked(.breakNow) == nil && canAll) {
                 if dev.dndLeft > 0 { Task { await dev.endBreak() } } else { showBreak = true }
             }
             Tile(icon: "video", name: "Cam & mic",
-                 detail: dev.watchAV ? (svc.avLive ? "live now" : "watching") : "off",
-                 on: dev.watchAV) {
+                 detail: canAll ? (dev.watchAV ? (svc.avLive ? "live now" : "watching") : "off") : "needs 7.4",
+                 on: dev.watchAV, enabled: canAll) {
                 dev.watchAV.toggle(); svc.syncAV()
             }
 
@@ -423,7 +428,7 @@ struct Panel: View {
             Tile(icon: "hand.tap", name: "Gestures",
                  detail: ges.on ? (ges.micLive ? (ges.muted ? "muted" : "on a call") : "on")
                                 : "off",
-                 on: ges.on, enabled: dev.reachable == true) {
+                 on: ges.on, enabled: canAll) {
                 ges.on.toggle()
                 if ges.on { showGestures = true; closeOthers(except: .gestures) }
             }

@@ -96,8 +96,9 @@ final class Services: ObservableObject {
     }
 
     func syncCursor() {
-        if dev.following && !dev.ip.isEmpty {
-            cursor.start(host: Self.host(dev.ip))
+        let wifi = dev.useWifi && !dev.ip.isEmpty
+        if dev.following && (wifi || RobotLink.shared.full) {
+            cursor.start(host: wifi ? Self.host(dev.ip) : "")
         } else {
             cursor.stop()
         }
