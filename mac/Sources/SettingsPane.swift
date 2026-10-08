@@ -53,6 +53,7 @@ struct SettingsPane: View {
     @EnvironmentObject var dev: Device
     @EnvironmentObject var svc: Services
     @ObservedObject private var up = Updater.shared
+    @ObservedObject private var link = RobotLink.shared
     @Binding var showing: Bool
 
     @State private var addr = ""
@@ -79,8 +80,23 @@ struct SettingsPane: View {
                 }
                 .buttonStyle(.plain)
 
+                // Bluetooth first: since firmware 6.0 the robot lives there.
+                Group2(title: "Bluetooth") {
+                    Row(title: "Link", note: link.name.isEmpty ? "" : link.name) {
+                        Text(link.state).font(.system(size: 11))
+                            .foregroundStyle(link.connected ? Color.green : Color.secondary)
+                    }
+                    if !link.firmware.isEmpty {
+                        Row(title: "Firmware") { Text(link.firmware).font(.system(size: 11)) }
+                    }
+                    Row(title: "Robot", note: "after a reset, or for another Rafiq") {
+                        Button("Forget and look again") { link.forget() }
+                            .font(.system(size: 11))
+                    }
+                }
+
                 Group2(title: "The robot") {
-                    Row(title: "Address", note: "SYSTEM on the robot shows it") {
+                    Row(title: "Address", note: "only while it is on WiFi") {
                         HStack(spacing: 6) {
                             TextField("192.168.1.42", text: $addr)
                                 .textFieldStyle(.roundedBorder)

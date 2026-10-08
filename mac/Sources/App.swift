@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct RafiqBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @ObservedObject private var dev = Device.shared
+    @ObservedObject private var link = RobotLink.shared
 
     var body: some Scene {
         MenuBarExtra {
@@ -54,7 +55,8 @@ struct RafiqBarApp: App {
     /// there is nothing to report, so it stays grey rather than claiming a
     /// fault that has not happened.
     private var face: RobotIcon.State {
-        if dev.ip.isEmpty { return .unset }
+        if link.connected { return .linked }
+        if dev.ip.isEmpty { return link.savedId == nil ? .unset : .adrift }
         switch dev.reachable {
         case .some(true):  return .linked
         case .some(false): return .adrift
@@ -67,6 +69,8 @@ struct Panel: View {
     @EnvironmentObject var dev: Device
     @EnvironmentObject var svc: Services
     @ObservedObject private var ges = Gestures.shared
+    @ObservedObject private var link = RobotLink.shared
+    @State private var showAway = false
 
     @State private var draft = ""
     @State private var showSettings = false
@@ -80,7 +84,7 @@ struct Panel: View {
     @Environment(\.colorScheme) private var systemScheme
 
     enum Page: String { case grid, settings, robot, pair, focus, breakNow, remind,
-                        phrases, gestures }
+                        phrases, gestures, away }
 
     /// The panel is this size on every page, always.
     ///
@@ -111,6 +115,7 @@ struct Panel: View {
         if keep != .remind   { showRemind = false }
         if keep != .phrases  { showPhrases = false }
         if keep != .gestures { showGestures = false }
+        if keep != .away     { showAway = false }
     }
 
     var body: some View {
@@ -158,6 +163,7 @@ struct Panel: View {
             case .remind:   showRemind = true
             case .phrases:  showPhrases = true
             case .gestures: showGestures = true
+            case .away:     showAway = true
             case .grid, .pair: break
             }
         }
@@ -222,7 +228,7 @@ struct Panel: View {
 
     @ViewBuilder
     private var page: some View {
-        if dev.ip.isEmpty {
+        if dev.ip.isEmpty && !link.connected && link.savedId == nil {
             FirstRun()
         } else if showSettings {
             scrolling { SettingsPane(showing: $showSettings) }
@@ -233,12 +239,14 @@ struct Panel: View {
         } else if dev.pairing {
             PairView()
         } else if showFocus {
-            Minutes(title: "Focus for", choices: [5, 10, 15, 25, 30, 45, 60, 90],
-                    note: "The panel shows the countdown, then rests, then shows it "
-                        + "again. It will not drop off until the time is up.",
+            Minutes(title: "Timer for", choices: [5, 10, 15, 25, 30, 45, 60, 90],
+                    note: "The robot shows a ring that fills as the time goes. Nothing "
+                        + "else works on it until the time is up, or you stop it here.",
                     showing: $showFocus) { m in
-                Task { await dev.startFocus(m) }
+                dev.startTimer(m)
             }
+        } else if showAway {
+            scrolling { AwaySheet(showing: $showAway) }
         } else if showBreak {
             Minutes(title: "On a break for", choices: [5, 10, 15, 20, 30, 45, 60, 90],
                     note: "The robot holds the sign and your Mac locks straight away. "
@@ -270,12 +278,14 @@ struct Panel: View {
             Text("RAFIQ")
                 .font(.system(size: 11, weight: .semibold))
                 .tracking(1.4)
-            if dev.focusLeft > 0 {
-                Text("\(max(0, dev.focusLeft) / 60 + 1)m")
+            if link.timerLeft > 0 {
+                pill(String(format: "%d:%02d", link.timerLeft / 60, link.timerLeft % 60), "timer")
+            }
+            if link.away { pill("away", "door.left.hand.open") }
+            if let b = link.battery {
+                Text("\(b)%")
                     .font(.system(size: 10, weight: .medium))
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.25)))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
             Button { showSettings.toggle(); closeOthers(except: .settings) } label: {
@@ -301,7 +311,18 @@ struct Panel: View {
         }
     }
 
+    private func pill(_ text: String, _ icon: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).font(.system(size: 8, weight: .semibold))
+            Text(text).font(.system(size: 10, weight: .medium)).monospacedDigit()
+        }
+        .padding(.horizontal, 5).padding(.vertical, 1)
+        .background(Capsule().fill(Color.accentColor.opacity(0.25)))
+        .foregroundStyle(Color.accentColor)
+    }
+
     private var dot: Color {
+        if link.connected { return .green }
         if dev.ip.isEmpty { return .secondary.opacity(0.5) }
         switch dev.reachable {
         case .some(true):  return dev.paired && !dev.linked ? .orange : .green
@@ -331,37 +352,48 @@ struct Panel: View {
     }
 
     private var grid: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 3),
-                  spacing: 7) {
+        // Four across now, sixteen tiles. The first two rows are what
+        // the robot does over Bluetooth; the last two are the Mac's own,
+        // several of which still need the robot on WiFi.
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4),
+                  spacing: 6) {
 
-            // row one
+            // row one: the robot, now
             Tile(icon: "text.quote", name: "Phrases", detail: "saved lines") {
                 showPhrases = true
             }
-            Tile(icon: dev.focusRunning ? "stop.circle" : "timer", name: "Focus",
-                 detail: dev.focusRunning ? "\(dev.focusLeft / 60 + 1) min left  ·  stop" : "",
-                 on: dev.focusRunning) {
-                if dev.focusRunning { Task { await dev.stopFocus() } } else { showFocus = true }
+            Tile(icon: link.timerLeft > 0 ? "stop.circle" : "timer", name: "Timer",
+                 detail: link.timerLeft > 0
+                       ? String(format: "%d:%02d  stop", link.timerLeft / 60, link.timerLeft % 60) : "minutes",
+                 on: link.timerLeft > 0) {
+                if link.timerLeft > 0 { dev.stopTimer() } else { showFocus = true; closeOthers(except: .focus) }
             }
-            Tile(icon: "eyes", name: "Follow",
-                 detail: dev.blocked(.follow) ?? "the pointer",
-                 on: dev.following, enabled: dev.blocked(.follow) == nil) {
-                Task { await dev.setFollow(!dev.following); svc.syncCursor() }
+            Tile(icon: "door.left.hand.open", name: "Away",
+                 detail: link.away ? "on  ·  end" : "message", on: link.away) {
+                if link.away { dev.endAway() } else { showAway = true; closeOthers(except: .away) }
+            }
+            Tile(icon: "dot.radiowaves.left.and.right", name: "Find", detail: "call out",
+                 enabled: link.connected) {
+                dev.findRobot()
             }
 
             // row two
             Tile(icon: "wind", name: "Relax",
-                 detail: dev.blocked(.relax) ?? "screensaver",
+                 detail: dev.blocked(.relax) ?? "3 min",
                  on: dev.relaxing, enabled: dev.blocked(.relax) == nil) {
                 Task { await dev.setRelax(!dev.relaxing) }
+            }
+            Tile(icon: "circle.dotted", name: "Zikr", detail: "count", enabled: link.connected) {
+                dev.zikr()
+            }
+            Tile(icon: "eyes", name: "Follow",
+                 detail: dev.blocked(.follow) ?? "needs WiFi",
+                 on: dev.following, enabled: dev.blocked(.follow) == nil) {
+                Task { await dev.setFollow(!dev.following); svc.syncCursor() }
             }
             Tile(icon: "doc.on.clipboard", name: "Clipboard",
                  detail: dev.watchClipboard ? "mirroring" : "off", on: dev.watchClipboard) {
                 dev.watchClipboard.toggle(); svc.syncClipboard()
-            }
-            Tile(icon: "figure.walk", name: "Breaks",
-                 detail: dev.breakOn ? "every \(dev.breakMins)m" : "off", on: dev.breakOn) {
-                dev.breakOn.toggle(); svc.syncBreaks()
             }
 
             // row three
@@ -371,36 +403,36 @@ struct Panel: View {
                  on: !Reminders.shared.pending.isEmpty) {
                 showRemind = true
             }
+            Tile(icon: "figure.walk", name: "Breaks",
+                 detail: dev.breakOn ? "every \(dev.breakMins)m" : "off", on: dev.breakOn) {
+                dev.breakOn.toggle(); svc.syncBreaks()
+            }
             Tile(icon: "cup.and.saucer", name: "On a break",
                  detail: dev.dndLeft > 0 ? "\(dev.dndLeft / 60 + 1) min left"
-                                         : (dev.blocked(.breakNow) ?? "locks the Mac"),
+                                         : (dev.blocked(.breakNow) ?? "locks Mac"),
                  on: dev.dndLeft > 0, enabled: dev.blocked(.breakNow) == nil) {
                 if dev.dndLeft > 0 { Task { await dev.endBreak() } } else { showBreak = true }
             }
-            Tile(icon: "video", name: "Camera & mic",
+            Tile(icon: "video", name: "Cam & mic",
                  detail: dev.watchAV ? (svc.avLive ? "live now" : "watching") : "off",
                  on: dev.watchAV) {
                 dev.watchAV.toggle(); svc.syncAV()
             }
 
             // row four
-            //
-            // Gestures sits here and Update has gone into the robot's
-            // settings. Update is something you do now and then and
-            // this is something you switch on and off, and a grid you
-            // glance at should be made of the second kind.
             Tile(icon: "hand.tap", name: "Gestures",
                  detail: ges.on ? (ges.micLive ? (ges.muted ? "muted" : "on a call") : "on")
                                 : "off",
                  on: ges.on, enabled: dev.reachable == true) {
-                // Switching it on opens the page, because switching it
-                // on is when you want to see what a knock will do.
-                // Switching it off is just off.
                 ges.on.toggle()
                 if ges.on { showGestures = true; closeOthers(except: .gestures) }
             }
-            Tile(icon: "moon.zzz", name: "Deep sleep",
-                 detail: dev.blocked(.deepSleep) ?? "power to wake",
+            Tile(icon: "arrow.triangle.2.circlepath", name: "Sync",
+                 detail: "WiFi minute", enabled: link.connected) {
+                dev.syncRobot()
+            }
+            Tile(icon: "moon.zzz", name: "Sleep",
+                 detail: dev.blocked(.deepSleep) ?? "touch wakes",
                  enabled: dev.blocked(.deepSleep) == nil) {
                 Task { await dev.deepSleep() }
             }
@@ -426,12 +458,23 @@ struct Panel: View {
 /// rather than opening a window full of things that cannot be used.
 struct FirstRun: View {
     @EnvironmentObject var dev: Device
+    @ObservedObject private var link = RobotLink.shared
     @State private var addr = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("Where is the robot?").font(.system(size: 12, weight: .semibold))
-            Text("Its SYSTEM screen shows the address.")
+            Text("Finding Rafiq").font(.system(size: 12, weight: .semibold))
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(RobotLink.shared.state).font(.system(size: 11))
+            }
+            Text("Over Bluetooth, nothing to type. Touch Rafiq to wake it, and "
+                 + "accept the pairing request when this Mac asks.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Divider().padding(.vertical, 4)
+            Text("Or on WiFi, by address").font(.system(size: 11, weight: .semibold))
+            Text("Its SYSTEM screen shows the address while it is on WiFi.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
             HStack(spacing: 7) {
                 TextField("192.168.1.42", text: $addr)
@@ -473,5 +516,69 @@ enum TestCard {
             plot(64 + Int(hx * s / 2.4), 32 - Int(hy * s / 2.4))
         }
         return Data(buf)
+    }
+}
+
+// ===================================================================
+//  Away: the robot shows your message and who to get in touch with, and
+//  nothing else, until Home. Sent from here it ends only from here (or
+//  a RAFIQ home); an Away that began because the phone left ends when
+//  the phone comes back.
+// ===================================================================
+struct AwaySheet: View {
+    @EnvironmentObject var dev: Device
+    @ObservedObject private var link = RobotLink.shared
+    @Binding var showing: Bool
+    @AppStorage("awayText") private var text: String = "Back soon"
+
+    private let presets = ["Back soon", "In a meeting", "At lunch", "Gone for the day",
+                           "Please do not touch"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Away").font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button { showing = false } label: {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+            }
+            TextField("Message", text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .lineLimit(2...4)
+                .padding(.horizontal, 9).padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.primary.opacity(0.07)))
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 2), spacing: 6) {
+                ForEach(presets, id: \.self) { p in
+                    Button { text = p } label: {
+                        Text(p).font(.system(size: 11)).lineLimit(1)
+                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.primary.opacity(0.06)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            HStack {
+                Button(link.away ? "Change message" : "Go away") {
+                    dev.goAway(text); showing = false
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!link.connected)
+                if link.away {
+                    Button("End Away") { dev.endAway(); showing = false }
+                }
+            }
+            .font(.system(size: 12))
+            Text(link.connected
+                 ? "The robot shows this and your contact card when touched, logs every touch "
+                   + "and move, and turns its radio off after five minutes. Only Home ends it."
+                 : "Needs Rafiq connected over Bluetooth.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
