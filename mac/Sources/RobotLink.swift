@@ -145,8 +145,9 @@ final class RobotLink: NSObject, ObservableObject {
         }
         readStat()
         poll?.invalidate()
-        poll = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.readStat() }
+        let me = self                        // a constant: see Gestures for why
+        poll = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
+            Task { @MainActor in me.readStat() }
         }
     }
 
