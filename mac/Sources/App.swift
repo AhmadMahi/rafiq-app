@@ -281,6 +281,8 @@ struct Panel: View {
             if link.timerLeft > 0 {
                 pill(String(format: "%d:%02d", link.timerLeft / 60, link.timerLeft % 60), "timer")
             }
+            if !link.connected && link.savedId != nil { pill("offline", "antenna.radiowaves.left.and.right.slash") }
+            if !link.queue.isEmpty { pill("\(link.queue.count) waiting", "tray") }
             if link.away { pill("away", "door.left.hand.open") }
             if let b = link.battery {
                 Text("\(b)%")
@@ -368,7 +370,7 @@ struct Panel: View {
             Tile(icon: link.timerLeft > 0 ? "stop.circle" : "timer", name: "Timer",
                  detail: link.timerLeft > 0
                        ? String(format: "%d:%02d  stop", link.timerLeft / 60, link.timerLeft % 60) : "minutes",
-                 on: link.timerLeft > 0) {
+                 on: link.timerLeft > 0, enabled: link.connected) {
                 if link.timerLeft > 0 { dev.stopTimer() } else { showFocus = true; closeOthers(except: .focus) }
             }
             // While away it is the way back: Home, in so many words.
@@ -385,7 +387,7 @@ struct Panel: View {
             // row two
             Tile(icon: "wind", name: "Relax",
                  detail: dev.blocked(.relax) ?? "3 min",
-                 on: dev.relaxing, enabled: dev.blocked(.relax) == nil) {
+                 on: dev.relaxing, enabled: dev.blocked(.relax) == nil && link.connected) {
                 Task { await dev.setRelax(!dev.relaxing) }
             }
             Tile(icon: "circle.dotted", name: "Zikr", detail: "count", enabled: link.connected) {
@@ -438,7 +440,7 @@ struct Panel: View {
             }
             Tile(icon: "moon.zzz", name: "Sleep",
                  detail: dev.blocked(.deepSleep) ?? "touch wakes",
-                 enabled: dev.blocked(.deepSleep) == nil) {
+                 enabled: dev.blocked(.deepSleep) == nil && link.connected) {
                 Task { await dev.deepSleep() }
             }
             Tile(icon: "slider.horizontal.3", name: "Settings", detail: "the robot") {

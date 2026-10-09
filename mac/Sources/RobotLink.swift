@@ -66,6 +66,59 @@ final class RobotLink: NSObject, ObservableObject {
     private var otaPos = 0
     private var otaPumping = false
     var canOta: Bool { otaChr != nil && connected }
+
+    // ---- 4.4: the queue, for when the robot is not there ----
+    //  Messages wait in order (they never clash). A state keeps only its
+    //  latest: Away then Home sends just Home; brightness 25 then 75 sends
+    //  75. Moments (a timer, find, relax) are not queued at all: late,
+    //  they would be wrong. Anything over three hours old is dropped.
+    struct Queued: Codable { var cmd: String; var key: String?; var at: Date }
+    @Published private(set) var queue: [Queued] = RobotLink.loadQueue()
+    /// The robot had 7.4's channels last time, so "!" commands are safe to queue.
+    var wasFull: Bool { UserDefaults.standard.bool(forKey: "bleFull") }
+    private static let maxAge: TimeInterval = 3 * 3600
+
+    static func queueKey(_ c: String) -> (ok: Bool, key: String?) {
+        if c.hasPrefix("msg: ") { return (true, nil) }
+        if c == "home" || c == "away" || c.hasPrefix("away: ") { return (true, "away") }
+        if c.hasPrefix("!cfg ") {
+            let p = c.split(separator: " ")
+            return (true, p.count > 1 ? "cfg:" + p[1] : "cfg")
+        }
+        if c.hasPrefix("bright ") { return (true, "cfg:bri") }
+        if c.hasPrefix("face ") { return (true, "cfg:face") }
+        for k in ["!mute ", "!vip ", "!bike ", "!tap ", "!deep ", "!autoup ", "!turn "] where c.hasPrefix(k) {
+            return (true, k)
+        }
+        if c.hasPrefix("!net ") || c.hasPrefix("!night ") { return (true, nil) }
+        return (false, nil)
+    }
+    /// Sent now if the robot is here; kept for later if it can wait.
+    @discardableResult
+    func sendOrQueue(_ c: String) -> Bool {
+        if connected { return send(c) }
+        let q = Self.queueKey(c)
+        guard q.ok else { return false }
+        if let k = q.key { queue.removeAll { $0.key == k } }
+        queue.append(Queued(cmd: c, key: q.key, at: Date()))
+        saveQueue()
+        return true
+    }
+    private func flushQueue() {
+        let now = Date()
+        let items = queue.filter { now.timeIntervalSince($0.at) < Self.maxAge }
+        queue = []; saveQueue()
+        for q in items { send(q.cmd) }
+    }
+    func clearQueue() { queue = []; saveQueue() }
+    nonisolated private static func loadQueue() -> [Queued] {
+        guard let d = UserDefaults.standard.data(forKey: "bleQueue"),
+              let q = try? JSONDecoder().decode([Queued].self, from: d) else { return [] }
+        return q
+    }
+    private func saveQueue() {
+        if let d = try? JSONEncoder().encode(queue) { UserDefaults.standard.set(d, forKey: "bleQueue") }
+    }
     private var lastPtr = ""
     private var lastPtrAt = Date.distantPast
 
@@ -249,6 +302,7 @@ final class RobotLink: NSObject, ObservableObject {
             p.writeValue(Data(Array(who.utf8).prefix(21)), for: c, type: .withResponse)
         }
         readStat()
+        flushQueue()                            // what waited while it was away
         poll?.invalidate()
         let me = self                        // a constant: see Gestures for why
         poll = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
@@ -410,6 +464,7 @@ extension RobotLink: CBPeripheralDelegate {
                 if c.uuid == RobotLink.uOta  { self.otaChr = c }
             }
             self.full = self.evtChr != nil && self.ptrChr != nil && self.cfgChr != nil
+            UserDefaults.standard.set(self.full, forKey: "bleFull")
             self.staleHint = false
             if self.cmdChr != nil && self.statChr != nil { self.ready(); Features.shared.linked() }
             else { self.state = "Rafiq needs firmware 7.2 or newer" }

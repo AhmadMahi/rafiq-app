@@ -682,7 +682,10 @@ final class Device: ObservableObject {
             eye  = Self.jsonInt(s, "eye");  tap  = Self.jsonInt(s, "tap")
             deepi = Self.jsonInt(s, "deepi")
             autoTurn = Self.jsonBool(s, "turn")
+            night = Self.jsonBool(s, "night")
+            if s.contains("\"bed\"") { bed = Self.jsonInt(s, "bed") }
         }
+        nightPush = Self.jsonInt(s, "npush")
         let b = Self.jsonInt(s, "battPct"); if b >= 0 { battPct = b }
         if let bf = Self.jsonDouble(s, "battFull") { battFull = bf }
         netMax = max(1, Self.jsonInt(s, "netMax"))
@@ -692,9 +695,17 @@ final class Device: ObservableObject {
     /// A RAFIQ command straight over Bluetooth, for the things only the
     /// Bluetooth side knows: the timer, Away, zikr, find.
     func command(_ c: String, say: String?) {
-        if RobotLink.shared.send(c) { if let say { flash(say) } }
-        else { flash("Not connected over Bluetooth") }
+        if RobotLink.shared.sendOrQueue(c) {
+            if let say { flash(RobotLink.shared.connected ? say : "Saved for when Rafiq is back") }
+        } else { flash("Rafiq is offline") }
     }
+    // 4.4: night sleep, kept on the robot
+    @Published var night = false
+    @Published var bed = 23 * 60
+    @Published var nightPush = 0
+    func setNight(_ on: Bool) { night = on; justChanged(); command("!cfg night \(on ? 1 : 0)", say: nil) }
+    func setBed(_ m: Int) { bed = m; justChanged(); command("!cfg bed \(m)", say: nil) }
+    func pushNight() { command("!night 60", say: "Night sleep an hour later, tonight") }
     func startTimer(_ m: Int)  { command("timer \(m)", say: "Timer, \(m) min") }
     func addTimer(_ m: Int)    { command(m >= 0 ? "timer +\(m)" : "timer \(m)", say: nil) }
     func stopTimer()           { command("home", say: "Timer stopped") }
@@ -726,6 +737,16 @@ final class Device: ObservableObject {
             if ok { reachable = true; trustLocalUntil = Date().addingTimeInterval(4); if let say { flash(say) } }
             else if say != nil { flash("Could not reach it") }
             return ok
+        }
+        // 4.4: the robot is away. What can wait is kept; the rest says so.
+        if !RobotLink.shared.connected && wifiIp.isEmpty {
+            if let cs = Self.bleCommands(path, fields, full: RobotLink.shared.wasFull) {
+                var kept = false
+                for c in cs where RobotLink.shared.sendOrQueue(c) { kept = true }
+                if kept { if say != nil { flash("Saved for when Rafiq is back") }; return true }
+            }
+            flash("Rafiq is offline")
+            return false
         }
         guard !wifiIp.isEmpty else {
             flash(RobotLink.shared.connected ? "That one needs WiFi (Settings)" : "Not connected")

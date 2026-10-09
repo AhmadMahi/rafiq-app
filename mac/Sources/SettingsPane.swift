@@ -149,6 +149,27 @@ struct SettingsPane: View {
                             .font(.system(size: 11))
                         }
                     }
+                    Row(title: "Night sleep", note: "Deep sleep from bedtime until just before Fajr; touch wakes it") {
+                        HStack {
+                            Spacer()
+                            Toggle("", isOn: Binding(get: { dev.night }, set: { dev.setNight($0) }))
+                                .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                        }
+                    }
+                    if dev.night {
+                        Row(title: "Bedtime", note: dev.nightPush > 0 ? "Tonight \(dev.nightPush / 60) h later" : "") {
+                            HStack(spacing: 6) {
+                                Picker("", selection: Binding(get: { dev.bed }, set: { dev.setBed($0) })) {
+                                    ForEach(Array(stride(from: 21 * 60, through: 25 * 60 + 30, by: 30)), id: \.self) { m in
+                                        Text(String(format: "%02d:%02d", (m % 1440) / 60, m % 60)).tag(m % 1440)
+                                    }
+                                }
+                                .labelsHidden().frame(width: 80)
+                                Button("An hour later") { dev.pushNight() }
+                            }
+                            .font(.system(size: 11))
+                        }
+                    }
                     fxToggle("Weather and prayer times", "Sent from this Mac each day, so Rafiq never needs WiFi for them", $fx.skyFromMac)
                     fxToggle("Low battery warning", "A notification on this Mac at 20% and 10%", $fx.lowBatt)
                     fxToggle("Last seen", fx.lastSeen.isEmpty ? "Remembers when and where Rafiq was last with this Mac" : fx.lastSeen, $fx.lastSeenOn)
