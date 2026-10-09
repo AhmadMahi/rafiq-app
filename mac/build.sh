@@ -3,7 +3,7 @@
 set -euo pipefail
 NAME="Rafiq"
 APP="build/$NAME.app"
-VER="4.1.0"
+VER="4.3.0"
 
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
@@ -41,6 +41,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <dict><key>NSAllowsLocalNetworking</key><true/></dict>
   <!-- Bluetooth is how it reaches the robot since firmware 6.0. Without
        this key macOS stops the app the moment it asks for Bluetooth. -->
+  <!-- 4.3: Apple Reminders on the robot; where it was last seen, and
+       weather and prayer times from this Mac. Asked only when switched on. -->
+  <key>NSRemindersUsageDescription</key>
+  <string>Rafiq shows your reminders and rings them on the robot.</string>
+  <key>NSRemindersFullAccessUsageDescription</key>
+  <string>Rafiq shows your reminders and rings them on the robot.</string>
+  <key>NSLocationUsageDescription</key>
+  <string>Rafiq uses your location for prayer times, weather, and where the robot was last seen.</string>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Rafiq uses your location for prayer times, weather, and where the robot was last seen.</string>
   <key>NSBluetoothAlwaysUsageDescription</key>
   <string>Rafiq talks to your Rafiq robot over Bluetooth.</string>
   <key>NSLocalNetworkUsageDescription</key>
