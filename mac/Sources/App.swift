@@ -265,6 +265,14 @@ struct Panel: View {
             scrolling { RemindSheet(showing: $showRemind) }
         } else if showPhrases {
             Phrases(showing: $showPhrases)
+        } else if !link.connected && link.savedId != nil
+                  && !(dev.useWifi && dev.reachable == true) {
+            // Nothing is listening, so a grid of switches is sixteen
+            // things that cannot happen. It says where the robot is
+            // instead, and settings stay where they always were, behind
+            // the gear, because changing them with Rafiq away is fine:
+            // they are kept and sent when it comes back.
+            Offline { showRobot = true; closeOthers(except: .robot) }
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 grid
@@ -595,5 +603,59 @@ struct AwaySheet: View {
                 .font(.system(size: 10)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+
+/// What the panel shows with nothing linked.
+struct Offline: View {
+    @ObservedObject private var link = RobotLink.shared
+    @ObservedObject private var fx = Features.shared
+    var openRobot: () -> Void
+
+    private var title: String {
+        if link.away { return "Rafiq is away" }
+        return "Rafiq is offline"
+    }
+    private var note: String {
+        if link.away {
+            return "It is looking after itself and checking for you now and then. "
+                 + "It comes back on its own when a device it knows is near."
+        }
+        return "It switches itself off when it is alone. Touch it to wake it, "
+             + "or turn it on, and it will connect by itself."
+    }
+
+    var body: some View {
+        VStack(spacing: 11) {
+            Image(nsImage: RobotIcon.image(link.away ? .unset : .adrift, size: 84))
+                .opacity(0.9)
+                .accessibilityHidden(true)
+            Text(title).font(.system(size: 15, weight: .semibold))
+            Text(note)
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 18)
+            if !fx.lastSeen.isEmpty {
+                Text(fx.lastSeen)
+                    .font(.system(size: 10)).foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
+            if !link.queue.isEmpty {
+                Text("\(link.queue.count) waiting to go across when it is back")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            Button("Robot settings") { openRobot() }
+                .font(.system(size: 11))
+                .padding(.top, 2)
+            Text("Anything you change there is kept and sent when Rafiq returns.")
+                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 18)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
     }
 }

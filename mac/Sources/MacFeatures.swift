@@ -486,20 +486,40 @@ final class Features: NSObject, ObservableObject {
     // ================================================================
 
     private var skyDay = UserDefaults.standard.string(forKey: "fSkyDay") ?? ""
+    /// When the weather last actually reached the robot, and when we last
+    /// tried at all.
+    ///
+    /// The day used to be marked done whether or not anything had been
+    /// fetched or sent, so one failed call, a Mac with no internet for a
+    /// moment, or a robot that dropped mid-fetch meant no prayer times and
+    /// no weather until tomorrow. Nothing said so, either.
+    private var wxAt = Date.distantPast
+    private var skyTryAt = Date.distantPast
     private func tickSky() {
         guard skyFromMac, link.full else { return }
         let day = Self.dayKey()
-        guard day != skyDay else { return }
+        let needPrayer = day != skyDay
+        // Prayer times are a day's worth. The weather is not: sending it
+        // once a day meant the robot showed this morning's sky all
+        // evening, so it goes again every hour.
+        let needWeather = Date().timeIntervalSince(wxAt) > 3600
+        guard needPrayer || needWeather else { return }
+        // A failing call must be retried, but not sixty times an hour.
+        guard Date().timeIntervalSince(skyTryAt) > 120 else { return }
+        skyTryAt = Date()
         locate { loc in
             guard let loc else { return }
-            Task { @MainActor in await self.fetchSky(loc, day: day) }
+            Task { @MainActor in
+                await self.fetchSky(loc, day: day, prayer: needPrayer, weather: needWeather)
+            }
         }
     }
-    private func fetchSky(_ loc: CLLocation, day: String) async {
+    private func fetchSky(_ loc: CLLocation, day: String, prayer: Bool, weather: Bool) async {
         let lat = loc.coordinate.latitude, lon = loc.coordinate.longitude
         // prayer times, the same way the robot asks for them (method 1, school 0)
         let f = DateFormatter(); f.dateFormat = "dd-MM-yyyy"
-        if let u = URL(string: "https://api.aladhan.com/v1/timings/\(f.string(from: Date()))?latitude=\(lat)&longitude=\(lon)&method=1&school=0"),
+        if prayer,
+           let u = URL(string: "https://api.aladhan.com/v1/timings/\(f.string(from: Date()))?latitude=\(lat)&longitude=\(lon)&method=1&school=0"),
            let r = try? await URLSession.shared.data(from: u),
            let j = try? JSONSerialization.jsonObject(with: r.0) as? [String: Any],
            let data = j["data"] as? [String: Any], let t = data["timings"] as? [String: String] {
@@ -508,10 +528,17 @@ final class Features: NSObject, ObservableObject {
                 let hm = v.prefix(5).split(separator: ":").compactMap { Int($0) }
                 return hm.count == 2 ? hm[0] * 60 + hm[1] : nil
             }
-            if mins.count == 5 { link.send("!pt " + mins.map(String.init).joined(separator: " ")) }
+            if mins.count == 5 {
+                link.sendOrQueue("!pt " + mins.map(String.init).joined(separator: " "))
+                // Only now is the day done. Marking it before this is what
+                // lost a whole day to one bad call.
+                skyDay = day
+                UserDefaults.standard.set(day, forKey: "fSkyDay")
+            }
         }
         // the weather, now
-        if let u = URL(string: "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code"),
+        if weather,
+           let u = URL(string: "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code"),
            let r = try? await URLSession.shared.data(from: u),
            let j = try? JSONSerialization.jsonObject(with: r.0) as? [String: Any],
            let c = j["current"] as? [String: Any] {
@@ -520,11 +547,11 @@ final class Features: NSObject, ObservableObject {
             let wind = Int(((c["wind_speed_10m"] as? Double) ?? 0).rounded())
             let cond = Self.sky((c["weather_code"] as? Int) ?? 0)
             placeThen { place in
-                self.link.send("temp=\(temp);cond=\(cond);hum=\(hum);wind=\(wind);city=" + RobotLink.ascii(place ?? ""))
+                self.link.sendOrQueue("temp=\(temp);cond=\(cond);hum=\(hum);wind=\(wind);city="
+                                      + RobotLink.ascii(place ?? ""))
+                self.wxAt = Date()
             }
         }
-        skyDay = day
-        UserDefaults.standard.set(day, forKey: "fSkyDay")
     }
     private static func sky(_ code: Int) -> String {
         switch code {

@@ -9,9 +9,17 @@ import AppKit
 enum RobotIcon {
     enum State { case linked, adrift, unset }
 
-    static func image(_ state: State) -> NSImage {
-        let size = NSSize(width: 18, height: 18)
+    /// The same head at any size. Everything below is written against an
+    /// 18 point square, which is the menu bar's, so a larger one is that
+    /// drawing scaled rather than a second set of numbers to keep in step.
+    static func image(_ state: State, size px: CGFloat = 18) -> NSImage {
+        let size = NSSize(width: px, height: px)
         let img = NSImage(size: size, flipped: false) { _ in
+            if px != 18 {
+                let t = NSAffineTransform()
+                t.scale(by: px / 18)
+                t.concat()
+            }
             let head = NSColor.labelColor
             let eye: NSColor
             switch state {
