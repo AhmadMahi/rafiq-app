@@ -65,6 +65,7 @@ final class RobotLink: NSObject, ObservableObject {
     private var otaData = Data()
     private var otaPos = 0
     private var otaPumping = false
+    private var otaStartAt = Date.distantPast
     var canOta: Bool { otaChr != nil && connected }
 
     // ---- 4.4: the queue, for when the robot is not there ----
@@ -225,7 +226,9 @@ final class RobotLink: NSObject, ObservableObject {
     }
     func otaCancel() { if otaBusy { send("!ota abort") }; otaBusy = false; otaPumping = false }
     func otaEvent(_ ev: String) {
-        if ev == "ota ready" { otaPumping = true; otaStatus = "Sending"; pump() }
+        if ev == "ota ready" {
+            otaPumping = true; otaStartAt = Date(); otaStatus = "Sending"; pump()
+        }
         else if ev == "ota ok" { otaBusy = false; otaPumping = false; otaProgress = 1; otaStatus = "Installed. Rafiq is restarting." }
         else if ev.hasPrefix("ota err") {
             otaBusy = false; otaPumping = false
@@ -242,6 +245,18 @@ final class RobotLink: NSObject, ObservableObject {
             otaPos = e
         }
         otaProgress = otaData.isEmpty ? 0 : Double(otaPos) / Double(otaData.count)
+        // Say how fast, because "slow" is not something anyone can act
+        // on and a rate is. A refused connection parameter request is
+        // silent, so the number here is the only sign of one.
+        let secs = Date().timeIntervalSince(otaStartAt)
+        if secs > 0.5, otaPos > 0 {
+            let rate = Double(otaPos) / secs                       // bytes a second
+            let left = Double(otaData.count - otaPos) / max(rate, 1)
+            otaStatus = String(format: "Sending  %.0f KB/s  about %@ left",
+                               rate / 1024,
+                               left < 90 ? String(format: "%.0fs", left)
+                                         : String(format: "%.0f min", left / 60))
+        }
         if otaPos >= otaData.count {
             otaPumping = false
             otaStatus = "Checking the image"
