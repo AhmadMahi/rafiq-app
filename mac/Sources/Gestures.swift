@@ -50,6 +50,10 @@ struct GMap: Codable, Equatable, Identifiable {
     var bundleId: String?
     var one: GAction = .nothing
     var two: GAction = .nothing
+    // 4.3: optional, so mappings saved before them still load
+    var hold: GAction? = nil
+    var leanLeft: GAction? = nil
+    var leanRight: GAction? = nil
     var name: String {
         guard let b = bundleId else { return "Everything else" }
         return GAction.appName(b) ?? b
@@ -190,14 +194,23 @@ final class Gestures: ObservableObject {
     // ------------------------------------------------------------
     private func act(_ which: String) {
         readFront()
-        let single = (which == "1")
-
-        if micTakesOver && micLive {
-            if single { muteAll() } else { unmute() }
+        // The old words, "1" and "2" (WiFi, and firmware before 7.5), keep
+        // their old meaning, the mic included. The new ones say where they
+        // came from, and a knock never reaches the mic: a bumped desk must
+        // not unmute you. The pad's mute is handled before this, in Features.
+        if (which == "1" || which == "2") && micTakesOver && micLive {
+            if which == "1" { muteAll() } else { unmute() }
             return
         }
         let m = mapping(for: frontApp)
-        run(single ? m.one : m.two)
+        switch which {
+        case "1", "t1", "k1": run(m.one)
+        case "2", "k2":       run(m.two)
+        case "th":            run(m.hold ?? .nothing)
+        case "ll":            run(m.leanLeft ?? .nothing)
+        case "lr":            run(m.leanRight ?? .nothing)
+        default:              break             // "t2" (the long hold) and "k3" are not yours
+        }
     }
 
     /// The most specific mapping that matches, or the fallback.
@@ -467,6 +480,11 @@ enum Keys {
     /// signature, which is why Rafiq is signed with a certificate
     /// that stays the same from build to build.
     static var trusted: Bool { AXIsProcessTrusted() }
+    /// macOS's own prompt, which also opens the right page of Settings.
+    static func ask() {
+        let o = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(o)
+    }
 
     static func openSettings() {
         let u = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"

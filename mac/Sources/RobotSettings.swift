@@ -10,7 +10,7 @@ struct RobotSettings: View {
     @Binding var showing: Bool
 
     @State private var page: Page? = nil
-    enum Page: Hashable { case brightness, face, sleep, tap, nets, turn, popup, eyes,
+    enum Page: Hashable { case filters, brightness, face, sleep, tap, nets, turn, popup, eyes,
                           battery, power, network, vehicle, firmware, reset }
 
     var body: some View {
@@ -57,6 +57,7 @@ struct RobotSettings: View {
         case .brightness: return "Brightness"
         case .face:       return "Watch face"
         case .sleep:      return "Sleep after"
+        case .filters:    return "Notifications"
         case .tap:        return "Controls"
         case .nets:       return "Networks"
         case .turn:       return "Page turn"
@@ -66,7 +67,7 @@ struct RobotSettings: View {
         case .vehicle:    return "Vehicle"
         case .battery:    return "Battery"
         case .power:      return "Power down"
-        case .firmware:   return "Firmware"
+        case .firmware:   return "Update"
         case .reset:      return "Reset"
         }
     }
@@ -101,16 +102,16 @@ struct RobotSettings: View {
                  detail: dev.battPct < 0 ? "no pack" : "\(dev.battPct)%") { page = .battery }
             Tile(icon: "powersleep", name: "Power down",
                  detail: dev.deepOff ? "off" : (Device.deepNames[safe: dev.deepi] ?? "")) { page = .power }
-            Tile(icon: "arrow.down.circle", name: "Firmware",
-                 detail: dev.autoUp ? "auto" : (dev.version.isEmpty ? "check" : dev.version)) { page = .firmware }
+            Tile(icon: "bell.badge", name: "Notifications",
+                 detail: RobotLink.shared.muted.isEmpty ? "every app" : "\(RobotLink.shared.muted.count) off") {
+                RobotLink.shared.readList(); page = .filters
+            }
+            Tile(icon: "arrow.down.circle", name: "Update",
+                 detail: dev.version.isEmpty ? "from a file" : dev.version) { page = .firmware }
             Tile(icon: "arrow.counterclockwise", name: "Reset",
                  detail: "settings only") { page = .reset }
-            Tile(icon: dev.offline ? "wifi.slash" : "wifi", name: "Network",
-                 detail: dev.offline ? "off" : (dev.netDown ? "no signal" : "on")) { page = .network }
-            Tile(icon: "arrow.down.circle", name: "Update",
-                 detail: dev.version.isEmpty ? "the robot" : dev.version) {
-                Task { await dev.checkUpdate() }
-            }
+            Tile(icon: "antenna.radiowaves.left.and.right", name: "Network",
+                 detail: "Bluetooth") { page = .network }
             Tile(icon: "bicycle", name: "Vehicle",
                  detail: dev.bike ? (Device.bikeTemplates[safe: dev.btpl] ?? "on") : "off") { page = .vehicle }
         }
@@ -245,50 +246,25 @@ struct RobotSettings: View {
             }
 
         case .network:
-            VStack(alignment: .leading, spacing: 9) {
-                Toggle(isOn: Binding(get: { !dev.offline },
-                                     set: { v in Task { await dev.setOffline(!v); await dev.refresh() } })) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Use the network").font(.system(size: 12))
-                        Text("Off means the radio is off and stays off. Everything "
-                             + "except the weather still works, and it switches itself "
-                             + "off between touches to save the battery.")
-                            .font(.system(size: 10)).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .toggleStyle(.switch).controlSize(.small)
-                if dev.netDown && !dev.offline {
-                    Text("It tried and found nothing, so the radio is off until it next "
-                         + "wakes. This is not a fault.")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-        case .vehicle:
-            VehiclePane()
-
-        case .firmware:
-            VStack(alignment: .leading, spacing: 9) {
-                Toggle(isOn: Binding(get: { dev.autoUp },
-                                     set: { v in Task { await dev.setAutoUpdate(v) } })) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Update itself").font(.system(size: 12))
-                        Text("Looks once a day and installs what it finds, "
-                             + "only while it is asleep and nothing is running")
-                            .font(.system(size: 10)).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .toggleStyle(.switch).controlSize(.small)
-
+            // What used to be "Use the network". Off now means every radio,
+            // Bluetooth too, which would cut this Mac off with no way back
+            // but the robot's own Settings, so it is not offered here.
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Bluetooth is always on").font(.system(size: 12, weight: .semibold))
+                Text("It is how this Mac and your phone reach the robot: notifications, "
+                     + "commands and settings all travel over it.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Divider()
-
-                Button { Task { await dev.checkUpdate() } } label: {
+                Text("WiFi is off until you ask").font(.system(size: 12, weight: .semibold))
+                Text("The robot turns WiFi on for a sync, an update, or when asked here, and "
+                     + "off again after ten minutes nobody uses it. That is most of its battery saved.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button { dev.command("wifi", say: "WiFi on for ten minutes") } label: {
                     HStack {
-                        Image(systemName: "arrow.down.circle").font(.system(size: 11))
-                        Text("Check for firmware now").font(.system(size: 12))
+                        Image(systemName: "wifi").font(.system(size: 11))
+                        Text("Turn the robot's WiFi on now").font(.system(size: 12))
                         Spacer()
                     }
                     .padding(.horizontal, 10).padding(.vertical, 7)
@@ -297,12 +273,18 @@ struct RobotSettings: View {
                         .fill(Color.primary.opacity(0.06)))
                 }
                 .buttonStyle(.plain)
-
-                if dev.version.isEmpty == false {
-                    Text("On \(dev.version) now.")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                }
+                Text("The networks it can join are under Networks.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
             }
+
+        case .vehicle:
+            VehiclePane()
+
+        case .filters:
+            FilterPane()
+
+        case .firmware:
+            UpdatePane()
 
         case .reset:
             VStack(alignment: .leading, spacing: 9) {
@@ -700,8 +682,11 @@ struct MapRow: View {
                     .buttonStyle(.plain).foregroundStyle(.secondary)
                 }
             }
-            ActionPicker(title: "One press", action: $map.one)
-            ActionPicker(title: "Two presses", action: $map.two)
+            ActionPicker(title: "Tap, or one knock", action: $map.one)
+            ActionPicker(title: "Two knocks", action: $map.two)
+            ActionPicker(title: "Hold the pad", action: Binding(get: { map.hold ?? .nothing }, set: { map.hold = $0 }))
+            ActionPicker(title: "Lean left", action: Binding(get: { map.leanLeft ?? .nothing }, set: { map.leanLeft = $0 }))
+            ActionPicker(title: "Lean right", action: Binding(get: { map.leanRight ?? .nothing }, set: { map.leanRight = $0 }))
         }
         .padding(7)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -885,5 +870,49 @@ struct KeyRecorder: View {
     private func stop() {
         listening = false
         if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+    }
+}
+
+
+/// Which apps reach the robot, and who always does. Kept on the robot, so
+/// the iPhone, Android and this Mac all follow the same list.
+struct FilterPane: View {
+    @ObservedObject private var link = RobotLink.shared
+    @State private var vipText = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Apps").font(.system(size: 12, weight: .semibold))
+            if link.apps.isEmpty {
+                Text("Apps appear here once Rafiq has had a notification from each.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            ForEach(link.apps, id: \.self) { a in
+                Toggle(isOn: Binding(
+                    get: { !link.muted.contains(where: { $0.caseInsensitiveCompare(a) == .orderedSame }) },
+                    set: { on in
+                        var m = link.muted.filter { $0.caseInsensitiveCompare(a) != .orderedSame }
+                        if !on { m.append(a) }
+                        link.setMuted(m)
+                    })) {
+                    Text(a).font(.system(size: 12))
+                }
+                .toggleStyle(.switch).controlSize(.small)
+            }
+            Divider()
+            Text("Always show").font(.system(size: 12, weight: .semibold))
+            Text("People or words that always come through, even from a switched-off app or with notifications quiet. Commas between them.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                TextField("Shukrana, urgent", text: $vipText).textFieldStyle(.roundedBorder).font(.system(size: 12))
+                Button("Save") {
+                    link.setVips(vipText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+                }
+                .font(.system(size: 11))
+            }
+        }
+        .onAppear { vipText = link.vips.joined(separator: ", ") }
+        .onChange(of: link.vips) { _, v in vipText = v.joined(separator: ", ") }
     }
 }

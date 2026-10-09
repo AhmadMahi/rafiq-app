@@ -273,13 +273,15 @@ final class Device: ObservableObject {
     //  the robot's own settings
     // ---------------------------------------------------------------
 
-    func setBrightness(_ i: Int) async { await run("/api/cfgv", ["k": "bri", "v": String(i)], say: nil) }
-    func setFace(_ i: Int)       async { await run("/api/cfgv", ["k": "face", "v": String(i)], say: nil) }
-    func setSleep(_ i: Int)      async { await run("/api/cfgv", ["k": "slpi", "v": String(i)], say: nil) }
-    func setEyes(_ i: Int)       async { await run("/api/cfgv", ["k": "eye", "v": String(i)], say: nil) }
-    func setPopup(_ i: Int)      async { await run("/api/cfgv", ["k": "popi", "v": String(i)], say: nil) }
+    // Shown at once, then sent. The robot's own read-back confirms it a
+    // moment later; until then the tick stays where you put it.
+    func setBrightness(_ i: Int) async { bri = i;  justChanged(); await run("/api/cfgv", ["k": "bri", "v": String(i)], say: nil) }
+    func setFace(_ i: Int)       async { face = i; justChanged(); await run("/api/cfgv", ["k": "face", "v": String(i)], say: nil) }
+    func setSleep(_ i: Int)      async { slpi = i; justChanged(); await run("/api/cfgv", ["k": "slpi", "v": String(i)], say: nil) }
+    func setEyes(_ i: Int)       async { eye = i;  justChanged(); await run("/api/cfgv", ["k": "eye", "v": String(i)], say: nil) }
+    func setPopup(_ i: Int)      async { popi = i; justChanged(); await run("/api/cfgv", ["k": "popi", "v": String(i)], say: nil) }
     func setTurn(_ auto: Bool)   async { await run("/api/turn", ["a": auto ? "1" : "0"], say: nil) }
-    func setTap(_ i: Int)        async { await run("/api/tap", ["n": String(i)], say: "Tap strength set") }
+    func setTap(_ i: Int)        async { tap = i; justChanged(); await run("/api/tap", ["n": String(i)], say: "Tap strength set") }
     func setDeepSleep(_ on: Bool) async {
         await run("/api/deep", ["off": on ? "0" : "1"], say: nil)
         deepOff = !on; justChanged()
@@ -317,6 +319,7 @@ final class Device: ObservableObject {
         shake = on
     }
     func setDeepAfter(_ i: Int) async {
+        deepi = i; justChanged()
         await run("/api/cfgv", ["k": "deepi", "v": String(i)], say: nil)
         deepi = i
     }
