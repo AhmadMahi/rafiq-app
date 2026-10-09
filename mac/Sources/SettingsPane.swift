@@ -54,6 +54,8 @@ struct SettingsPane: View {
     @EnvironmentObject var svc: Services
     @ObservedObject private var up = Updater.shared
     @ObservedObject private var link = RobotLink.shared
+    @ObservedObject private var fx = Features.shared
+    @State private var pinText = ""
     @Binding var showing: Bool
 
     @State private var addr = ""
@@ -115,6 +117,48 @@ struct SettingsPane: View {
                     Row(title: "Robot", note: "after a reset, or for another Rafiq") {
                         Button("Forget and look again") { link.forget() }
                             .font(.system(size: 11))
+                    }
+                }
+
+                // 4.3: what the robot and this Mac do for each other.
+                Group2(title: "Rafiq and this Mac") {
+                    if !link.full {
+                        Row(title: "Needs Rafiq 7.5", note: "Most of this works once the robot is updated") { EmptyView() }
+                    }
+                    fxToggle("Meeting mute", "In a call, a tap on the pad mutes this Mac's microphone; the next tap unmutes", $fx.meetMute)
+                    fxToggle("Presentation clicker", "In Keynote, PowerPoint or a browser: knock for next, lean for back", $fx.clicker)
+                    fxToggle("Volume knob", "Hold the pad and tilt Rafiq to turn the volume", $fx.knob)
+                    fxToggle("Screenshot", "Three knocks: the whole screen, to the clipboard", $fx.shot)
+                    fxToggle("Mac health", "Battery and free space on Rafiq's Mac screen, and a word when something needs you", $fx.health)
+                    fxToggle("Dim while typing", "Rafiq's screen goes low while you type", $fx.dimTyping)
+                    fxToggle("Prayer pause", "At the call to prayer this Mac goes quiet for \(fx.prayMinutes) minutes (not in a call)", $fx.prayPause)
+                    fxToggle("Walk-away lock", "Take Rafiq with you and this Mac locks; leave the Mac and Rafiq tells you", $fx.walkAway)
+                    if fx.walkAway {
+                        Row(title: "Calibrate", note: "Sit at your desk with Rafiq where you keep it, then press") {
+                            HStack { Spacer(); Button("Here") { fx.calibrateWalk() } }
+                        }
+                    }
+                    fxToggle("Apple Reminders", "Due reminders ring on Rafiq even with this Mac asleep; the top three show on its Mac screen", $fx.reminders)
+                    if fx.reminders {
+                        Row(title: "Pinned task", note: fx.pinned.isEmpty ? "Shown first; hold on Rafiq to tick it off" : "Now: " + fx.pinned) {
+                            HStack(spacing: 4) {
+                                TextField("Write proposal", text: $pinText).textFieldStyle(.roundedBorder).frame(width: 110)
+                                Button("Pin") { fx.pin(pinText); pinText = "" }
+                                if !fx.pinned.isEmpty { Button("Clear") { fx.pin("") } }
+                            }
+                            .font(.system(size: 11))
+                        }
+                    }
+                    fxToggle("Weather and prayer times", "Sent from this Mac each day, so Rafiq never needs WiFi for them", $fx.skyFromMac)
+                    fxToggle("Low battery warning", "A notification on this Mac at 20% and 10%", $fx.lowBatt)
+                    fxToggle("Last seen", fx.lastSeen.isEmpty ? "Remembers when and where Rafiq was last with this Mac" : fx.lastSeen, $fx.lastSeenOn)
+                    if !Keys.trusted && (fx.clicker || fx.shot) {
+                        Row(title: "Accessibility", note: "The clicker presses keys for you, which macOS asks you to allow once") {
+                            HStack { Spacer(); Button("Allow") { Keys.ask() } }
+                        }
+                    }
+                    if !fx.note.isEmpty {
+                        Text(fx.note).font(.system(size: 10)).foregroundStyle(.orange)
                     }
                 }
 
@@ -241,6 +285,12 @@ struct SettingsPane: View {
             }
         }
         .onAppear { addr = dev.ip }
+    }
+
+    private func fxToggle(_ t: String, _ n: String, _ b: Binding<Bool>) -> some View {
+        Row(title: t, note: n) {
+            HStack { Spacer(); Toggle("", isOn: b).labelsHidden().toggleStyle(.switch).controlSize(.small) }
+        }
     }
 
     private var appNote: String {

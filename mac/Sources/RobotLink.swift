@@ -28,6 +28,10 @@ final class RobotLink: NSObject, ObservableObject {
     static let uEvt = CBUUID(string: "52a1f005-7a3e-4b5c-9d6f-0a1b2c3d4e5f")
     static let uPtr = CBUUID(string: "52a1f006-7a3e-4b5c-9d6f-0a1b2c3d4e5f")
     static let uCfg = CBUUID(string: "52a1f007-7a3e-4b5c-9d6f-0a1b2c3d4e5f")
+    // firmware 7.5: notifications from the Mac, the app list, updates
+    static let uNote = CBUUID(string: "52a1f002-7a3e-4b5c-9d6f-0a1b2c3d4e5f")
+    static let uLst  = CBUUID(string: "52a1f008-7a3e-4b5c-9d6f-0a1b2c3d4e5f")
+    static let uOta  = CBUUID(string: "52a1f009-7a3e-4b5c-9d6f-0a1b2c3d4e5f")
     /// The robot also advertises HID, which is how macOS may already
     /// hold a connection to it before this app asks.
     static let uHid = CBUUID(string: "1812")
@@ -45,6 +49,23 @@ final class RobotLink: NSObject, ObservableObject {
     private var evtChr: CBCharacteristic?
     private var ptrChr: CBCharacteristic?
     private var cfgChr: CBCharacteristic?
+    private var noteChr: CBCharacteristic?
+    private var lstChr: CBCharacteristic?
+    private var otaChr: CBCharacteristic?
+    /// Signal strength, smoothed: walk-away reads it.
+    @Published private(set) var rssi: Double = 0
+    /// The robot's app filter: apps it has seen, those switched off, VIPs.
+    @Published private(set) var apps: [String] = []
+    @Published private(set) var muted: [String] = []
+    @Published private(set) var vips: [String] = []
+    /// Updates over Bluetooth.
+    @Published private(set) var otaProgress: Double = 0
+    @Published private(set) var otaStatus = ""
+    @Published private(set) var otaBusy = false
+    private var otaData = Data()
+    private var otaPos = 0
+    private var otaPumping = false
+    var canOta: Bool { otaChr != nil && connected }
     private var lastPtr = ""
     private var lastPtrAt = Date.distantPast
 
@@ -67,6 +88,7 @@ final class RobotLink: NSObject, ObservableObject {
         super.init()
         guard !Device.inert else { return }
         central = CBCentralManager(delegate: self, queue: .main)
+        Features.shared.start()               // the Mac batch: timers and observers, once
     }
 
     // ---------------------------------------------------------------
@@ -118,6 +140,59 @@ final class RobotLink: NSObject, ObservableObject {
         if msg == lastPtr && now.timeIntervalSince(lastPtrAt) < 1 { return }
         lastPtr = msg; lastPtrAt = now
         p.writeValue(Data(msg.utf8), for: c, type: .withoutResponse)
+    }
+
+    /// A notification from the Mac itself (health, warnings), shown like a phone's.
+    func sendNote(cat: Int, app: String, title: String, text: String) {
+        guard connected, let p = peripheral, let c = noteChr else { return }
+        let room = max(20, p.maximumWriteValueLength(for: .withResponse))
+        var s = "\(cat)\u{1F}" + Self.ascii(app) + "\u{1F}" + Self.ascii(title) + "\u{1F}" + Self.ascii(text)
+        if s.utf8.count > room { s = String(s.prefix(room)) }
+        p.writeValue(Data(s.utf8), for: c, type: .withResponse)
+    }
+
+    func readList() {
+        guard connected, let p = peripheral, let c = lstChr else { return }
+        p.readValue(for: c)
+    }
+    /// Which apps reach the robot, and who always does.
+    func setMuted(_ names: [String]) { send("!mute " + names.map(Self.ascii).joined(separator: "\u{1F}")); muted = names }
+    func setVips(_ words: [String]) { send("!vip " + words.map(Self.ascii).joined(separator: "\u{1F}")); vips = words }
+
+    func readRSSI() { if connected { peripheral?.readRSSI() } }
+
+    // ---- updates over Bluetooth ----
+    /// Asks the robot to make room; the bytes go when it says "ota ready".
+    func otaBegin(_ d: Data) {
+        guard canOta else { otaStatus = "Needs Rafiq 7.5 connected"; return }
+        otaData = d; otaPos = 0; otaProgress = 0; otaBusy = true; otaPumping = false
+        otaStatus = "Asking Rafiq to make room"
+        send("!ota begin \(d.count)")
+    }
+    func otaCancel() { if otaBusy { send("!ota abort") }; otaBusy = false; otaPumping = false }
+    func otaEvent(_ ev: String) {
+        if ev == "ota ready" { otaPumping = true; otaStatus = "Sending"; pump() }
+        else if ev == "ota ok" { otaBusy = false; otaPumping = false; otaProgress = 1; otaStatus = "Installed. Rafiq is restarting." }
+        else if ev.hasPrefix("ota err") {
+            otaBusy = false; otaPumping = false
+            otaStatus = "Rafiq stopped it (" + String(ev.dropFirst(8)) + "). Nothing was changed; try again."
+        }
+    }
+    /// As fast as the link takes it: CoreBluetooth says when there is room.
+    fileprivate func pump() {
+        guard otaPumping, let p = peripheral, let c = otaChr else { return }
+        let n = max(20, p.maximumWriteValueLength(for: .withoutResponse))
+        while p.canSendWriteWithoutResponse && otaPos < otaData.count {
+            let e = min(otaPos + n, otaData.count)
+            p.writeValue(otaData.subdata(in: otaPos..<e), for: c, type: .withoutResponse)
+            otaPos = e
+        }
+        otaProgress = otaData.isEmpty ? 0 : Double(otaPos) / Double(otaData.count)
+        if otaPos >= otaData.count {
+            otaPumping = false
+            otaStatus = "Checking the image"
+            send("!ota end")
+        }
     }
 
     /// Forget this robot and look again, for a new one or after a reset.
@@ -184,6 +259,9 @@ final class RobotLink: NSObject, ObservableObject {
     private func lost() {
         connected = false
         full = false
+        noteChr = nil; lstChr = nil; otaChr = nil; rssi = 0
+        if otaBusy { otaBusy = false; otaPumping = false; otaStatus = "The link dropped. Nothing was changed; try again." }
+        Features.shared.unlinked()
         evtChr = nil; ptrChr = nil; cfgChr = nil
         poll?.invalidate(); poll = nil
         cmdChr = nil; timeChr = nil; statChr = nil
@@ -283,6 +361,17 @@ extension RobotLink: CBCentralManagerDelegate {
 }
 
 extension RobotLink: CBPeripheralDelegate {
+    nonisolated func peripheralIsReady(toSendWriteWithoutResponse p: CBPeripheral) {
+        MainActor.assumeIsolated { self.pump() }
+    }
+    nonisolated func peripheral(_ p: CBPeripheral, didReadRSSI r: NSNumber, error: Error?) {
+        let v = r.doubleValue
+        MainActor.assumeIsolated {
+            guard error == nil, v < 0 else { return }
+            self.rssi = self.rssi == 0 ? v : self.rssi * 0.7 + v * 0.3
+        }
+    }
+
     /// The robot says its services changed (firmware 7.4.1 says so on
     /// every link): forget what was found and look again. Without this a
     /// Mac that paired before an update never sees the new channels.
@@ -301,7 +390,8 @@ extension RobotLink: CBPeripheralDelegate {
                 return
             }
             p.discoverCharacteristics([RobotLink.uCmd, RobotLink.uTime, RobotLink.uStat,
-                                       RobotLink.uEvt, RobotLink.uPtr, RobotLink.uCfg], for: s)
+                                       RobotLink.uEvt, RobotLink.uPtr, RobotLink.uCfg,
+                                       RobotLink.uNote, RobotLink.uLst, RobotLink.uOta], for: s)
         }
     }
 
@@ -315,10 +405,13 @@ extension RobotLink: CBPeripheralDelegate {
                 if c.uuid == RobotLink.uEvt  { self.evtChr = c; p.setNotifyValue(true, for: c) }
                 if c.uuid == RobotLink.uPtr  { self.ptrChr = c }
                 if c.uuid == RobotLink.uCfg  { self.cfgChr = c }
+                if c.uuid == RobotLink.uNote { self.noteChr = c }
+                if c.uuid == RobotLink.uLst  { self.lstChr = c }
+                if c.uuid == RobotLink.uOta  { self.otaChr = c }
             }
             self.full = self.evtChr != nil && self.ptrChr != nil && self.cfgChr != nil
             self.staleHint = false
-            if self.cmdChr != nil && self.statChr != nil { self.ready() }
+            if self.cmdChr != nil && self.statChr != nil { self.ready(); Features.shared.linked() }
             else { self.state = "Rafiq needs firmware 7.2 or newer" }
         }
     }
@@ -343,7 +436,15 @@ extension RobotLink: CBPeripheralDelegate {
             }
             // a knock or a press, in gesture mode
             if c.uuid == RobotLink.uEvt, let v, let s = String(data: v, encoding: .ascii), !s.isEmpty {
-                Gestures.shared.heardBluetooth(s)
+                // the Mac's own features first (calls, meetings, slides, the
+                // knob, screenshots, prayer, tasks, updates), then your gestures
+                if !Features.shared.handle(s) { Gestures.shared.heardBluetooth(s) }
+            }
+            if c.uuid == RobotLink.uLst, let v, let s = String(data: v, encoding: .utf8),
+               let j = try? JSONSerialization.jsonObject(with: Data(s.utf8)) as? [String: Any] {
+                self.apps = j["apps"] as? [String] ?? []
+                self.muted = j["muted"] as? [String] ?? []
+                self.vips = j["vip"] as? [String] ?? []
             }
             // the robot's settings, with /api/state's own names
             if c.uuid == RobotLink.uCfg, let v, let s = String(data: v, encoding: .utf8) {

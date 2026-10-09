@@ -10,7 +10,7 @@ struct RobotSettings: View {
     @Binding var showing: Bool
 
     @State private var page: Page? = nil
-    enum Page: Hashable { case brightness, face, sleep, tap, nets, turn, popup, eyes,
+    enum Page: Hashable { case filters, brightness, face, sleep, tap, nets, turn, popup, eyes,
                           battery, power, network, vehicle, firmware, reset }
 
     var body: some View {
@@ -57,6 +57,7 @@ struct RobotSettings: View {
         case .brightness: return "Brightness"
         case .face:       return "Watch face"
         case .sleep:      return "Sleep after"
+        case .filters:    return "Notifications"
         case .tap:        return "Controls"
         case .nets:       return "Networks"
         case .turn:       return "Page turn"
@@ -101,6 +102,10 @@ struct RobotSettings: View {
                  detail: dev.battPct < 0 ? "no pack" : "\(dev.battPct)%") { page = .battery }
             Tile(icon: "powersleep", name: "Power down",
                  detail: dev.deepOff ? "off" : (Device.deepNames[safe: dev.deepi] ?? "")) { page = .power }
+            Tile(icon: "bell.badge", name: "Notifications",
+                 detail: RobotLink.shared.muted.isEmpty ? "every app" : "\(RobotLink.shared.muted.count) off") {
+                RobotLink.shared.readList(); page = .filters
+            }
             Tile(icon: "arrow.down.circle", name: "Update",
                  detail: dev.version.isEmpty ? "from a file" : dev.version) { page = .firmware }
             Tile(icon: "arrow.counterclockwise", name: "Reset",
@@ -274,6 +279,9 @@ struct RobotSettings: View {
 
         case .vehicle:
             VehiclePane()
+
+        case .filters:
+            FilterPane()
 
         case .firmware:
             UpdatePane()
@@ -674,8 +682,11 @@ struct MapRow: View {
                     .buttonStyle(.plain).foregroundStyle(.secondary)
                 }
             }
-            ActionPicker(title: "One press", action: $map.one)
-            ActionPicker(title: "Two presses", action: $map.two)
+            ActionPicker(title: "Tap, or one knock", action: $map.one)
+            ActionPicker(title: "Two knocks", action: $map.two)
+            ActionPicker(title: "Hold the pad", action: Binding(get: { map.hold ?? .nothing }, set: { map.hold = $0 }))
+            ActionPicker(title: "Lean left", action: Binding(get: { map.leanLeft ?? .nothing }, set: { map.leanLeft = $0 }))
+            ActionPicker(title: "Lean right", action: Binding(get: { map.leanRight ?? .nothing }, set: { map.leanRight = $0 }))
         }
         .padding(7)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -859,5 +870,49 @@ struct KeyRecorder: View {
     private func stop() {
         listening = false
         if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+    }
+}
+
+
+/// Which apps reach the robot, and who always does. Kept on the robot, so
+/// the iPhone, Android and this Mac all follow the same list.
+struct FilterPane: View {
+    @ObservedObject private var link = RobotLink.shared
+    @State private var vipText = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Apps").font(.system(size: 12, weight: .semibold))
+            if link.apps.isEmpty {
+                Text("Apps appear here once Rafiq has had a notification from each.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            ForEach(link.apps, id: \.self) { a in
+                Toggle(isOn: Binding(
+                    get: { !link.muted.contains(where: { $0.caseInsensitiveCompare(a) == .orderedSame }) },
+                    set: { on in
+                        var m = link.muted.filter { $0.caseInsensitiveCompare(a) != .orderedSame }
+                        if !on { m.append(a) }
+                        link.setMuted(m)
+                    })) {
+                    Text(a).font(.system(size: 12))
+                }
+                .toggleStyle(.switch).controlSize(.small)
+            }
+            Divider()
+            Text("Always show").font(.system(size: 12, weight: .semibold))
+            Text("People or words that always come through, even from a switched-off app or with notifications quiet. Commas between them.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                TextField("Shukrana, urgent", text: $vipText).textFieldStyle(.roundedBorder).font(.system(size: 12))
+                Button("Save") {
+                    link.setVips(vipText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+                }
+                .font(.system(size: 11))
+            }
+        }
+        .onAppear { vipText = link.vips.joined(separator: ", ") }
+        .onChange(of: link.vips) { _, v in vipText = v.joined(separator: ", ") }
     }
 }

@@ -27,7 +27,29 @@ struct UpdatePane: View {
                  file.map { "\($0.lastPathComponent), \(size / 1024) KB" } ?? "the APP .bin, not the FULL one") {
                 Button(file == nil ? "Choose..." : "Change") { choose() }
             }
-            step(2, "Open the robot's hotspot",
+            // 4.3 with firmware 7.5: straight over Bluetooth, no hotspot.
+            if link.canOta {
+                step(2, "Send it over Bluetooth",
+                     "About two minutes. Keep Rafiq near this Mac; it restarts by itself when done") {
+                    if link.otaBusy { Button("Stop") { link.otaCancel() } }
+                    else {
+                        Button("Send") {
+                            if let u = file, let d = try? Data(contentsOf: u) { link.otaBegin(d) }
+                        }
+                        .disabled(file == nil)
+                    }
+                }
+                if link.otaBusy || !link.otaStatus.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if link.otaBusy { ProgressView(value: link.otaProgress) }
+                        Text(link.otaStatus).font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+                Divider()
+                Text("Or through the hotspot, for a robot older than 7.5:")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            step(link.canOta ? 3 : 2, "Open the robot's hotspot",
                  "Then join RAFIQ-SETUP (password: password) from the WiFi menu at the top of the screen") {
                 Button("Open hotspot") {
                     dev.command("config", say: "Hotspot on")
@@ -35,7 +57,7 @@ struct UpdatePane: View {
                 }
                 .disabled(file == nil || !link.connected)
             }
-            step(3, "Send it",
+            step(link.canOta ? 4 : 3, "Send it",
                  "Takes about a minute. The robot restarts by itself when it is done") {
                 Button("Upload") { Task { await upload() } }
                     .disabled(file == nil || phase == .sending)
