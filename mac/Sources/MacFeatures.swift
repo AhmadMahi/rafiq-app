@@ -39,6 +39,27 @@ final class Features: NSObject, ObservableObject {
     @Published var walkLimit = UserDefaults.standard.object(forKey: "fWalkDb") as? Int ?? -85 {
         didSet { UserDefaults.standard.set(walkLimit, forKey: "fWalkDb") } }
 
+    /// How far away counts as gone, kept as a distance rather than a number
+    /// of decibels.
+    ///
+    /// Signal strength is negative and gets more negative with distance: at
+    /// the desk it is around -55, across a room -85, through a wall -100.
+    /// "Calibrated: leaving starts below -89 dBm" is true and tells you
+    /// nothing you can act on, so the reading at the desk is stored instead
+    /// and the threshold is worked out from it. Radio indoors is not a tape
+    /// measure, so these are honest approximations: about 6 dB per doubling
+    /// of distance in the open, more through furniture and bodies.
+    @Published var walkDesk = UserDefaults.standard.object(forKey: "fWalkDesk") as? Int ?? 0 {
+        didSet { UserDefaults.standard.set(walkDesk, forKey: "fWalkDesk"); applyWalkRange() } }
+    @Published var walkRange = UserDefaults.standard.object(forKey: "fWalkRange") as? Int ?? 1 {
+        didSet { UserDefaults.standard.set(walkRange, forKey: "fWalkRange"); applyWalkRange() } }
+    static let walkMargins = [12, 18, 24]
+    static let walkWords   = ["about 2 m, 6 feet", "about 3 m, 10 feet", "about 5 m, 16 feet"]
+    private func applyWalkRange() {
+        guard walkDesk != 0 else { return }
+        walkLimit = walkDesk - Features.walkMargins[min(max(walkRange, 0), 2)]
+    }
+
     // ------------------------------------------------------------ state shown
     @Published private(set) var pinned = UserDefaults.standard.string(forKey: "fPin") ?? ""
     @Published private(set) var topTitles: [String] = []
@@ -77,7 +98,11 @@ final class Features: NSObject, ObservableObject {
     /// Every time the robot links: tell it what is switched on, and
     /// send what it should be showing.
     func linked() {
-        awake = true; walkGoneAt = nil; locked = false
+        awake = true; walkGoneAt = nil
+        // Walking back in often means the link dropped and came back rather
+        // than the signal merely rising, and that path only cleared the flag
+        // and left the screen dark. Coming back is coming back either way.
+        if locked { locked = false; wakeScreen() } else { locked = false }
         push()
         lastHealth = ""; tickHealth()
         refreshTasks()
@@ -169,10 +194,28 @@ final class Features: NSObject, ObservableObject {
 
     // ---- three knocks: the whole screen, to the clipboard ----
     private func screenshot() {
+        // screencapture needs Screen Recording, and without it it exits
+        // quietly having copied nothing. The old version launched it, never
+        // waited, and told the robot "Screenshot copied" either way, so a
+        // permission that had never been granted looked exactly like success.
+        guard CGPreflightScreenCaptureAccess() else {
+            _ = CGRequestScreenCaptureAccess()
+            note = "Allow Screen Recording for Rafiq in System Settings, Privacy and Security, then try again"
+            link.send("msg: Allow Screen Recording")
+            return
+        }
+        let before = NSPasteboard.general.changeCount
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         p.arguments = ["-c", "-x"]
-        do { try p.run(); link.send("msg: Screenshot copied") } catch { }
+        do { try p.run(); p.waitUntilExit() }
+        catch { link.send("msg: Screenshot failed"); return }
+        if NSPasteboard.general.changeCount != before {
+            link.send("msg: Screenshot copied")
+        } else {
+            note = "The screenshot did not reach the clipboard"
+            link.send("msg: Screenshot failed")
+        }
     }
 
     // ================================================================
@@ -364,12 +407,13 @@ final class Features: NSObject, ObservableObject {
             lockNow()
         }
     }
-    /// Where you sit now, minus a margin, is where it starts to count as gone.
+    /// Where you sit now is the reference; the distance setting does the rest.
     func calibrateWalk() {
         let r = link.rssi
         guard r != 0 else { note = "Keep Rafiq with you at your desk, then try again"; return }
-        walkLimit = Int(r) - 12
-        note = "Calibrated: leaving starts below \(walkLimit) dBm"
+        walkDesk = Int(r)                       // didSet works out the threshold
+        note = "Calibrated at your desk. The Mac locks when Rafiq is "
+             + Features.walkWords[min(max(walkRange, 0), 2)] + " away."
     }
     private func lockNow() {
         guard !locked else { return }
@@ -391,10 +435,23 @@ final class Features: NSObject, ObservableObject {
     // ================================================================
 
     private var seenAt = Date.distantPast
-    private func noteSeenNow() { seenAt = Date() }
+    private func noteSeenNow() {
+        seenAt = Date()
+        // The private timestamp was being kept up to date and the line on
+        // the panel was not, so while Rafiq sat there linked you were still
+        // reading the time of the last drop, minutes old. Nothing extra goes
+        // over the radio for this: the app already reads STAT every ten
+        // seconds, so being linked is itself the evidence.
+        guard lastSeenOn else { return }
+        lastSeen = "With this Mac now"
+        UserDefaults.standard.set(lastSeen, forKey: "fSeenText")
+    }
     private func noteLastSeen() {
         guard lastSeenOn else { return }
-        let t = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
+        // Stamped from the last confirmed contact rather than from the
+        // moment the disconnect was noticed, which can be much later.
+        let when = seenAt == Date.distantPast ? Date() : seenAt
+        let t = DateFormatter.localizedString(from: when, dateStyle: .none, timeStyle: .short)
         lastSeen = "Last with this Mac at \(t)"
         UserDefaults.standard.set(lastSeen, forKey: "fSeenText")
         placeThen { place in

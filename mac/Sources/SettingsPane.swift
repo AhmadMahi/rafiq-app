@@ -134,9 +134,24 @@ struct SettingsPane: View {
                     fxToggle("Mac health", "Battery and free space on Rafiq's Mac screen, and a word when something needs you", $fx.health)
                     fxToggle("Dim while typing", "Rafiq's screen goes low while you type", $fx.dimTyping)
                     fxToggle("Prayer pause", "At the call to prayer this Mac goes quiet for \(fx.prayMinutes) minutes (not in a call)", $fx.prayPause)
-                    fxToggle("Walk-away lock", "Take Rafiq with you and this Mac locks; leave the Mac and Rafiq tells you", $fx.walkAway)
+                    fxToggle("Walk-away lock",
+                             "Uses Rafiq. Carry it away and this Mac locks and the screen goes off; come back and the screen wakes for your password",
+                             $fx.walkAway)
                     if fx.walkAway {
-                        Row(title: "Calibrate", note: "Sit at your desk with Rafiq where you keep it, then press") {
+                        Row(title: "Locks when Rafiq is",
+                            note: "Radio indoors is not a tape measure, so these are approximate") {
+                            Picker("", selection: Binding(get: { fx.walkRange },
+                                                          set: { fx.walkRange = $0 })) {
+                                Text("2 m").tag(0)
+                                Text("3 m").tag(1)
+                                Text("5 m").tag(2)
+                            }
+                            .labelsHidden().pickerStyle(.segmented).frame(width: 160)
+                        }
+                        Row(title: "Calibrate",
+                            note: fx.walkDesk == 0
+                                ? "Sit at your desk with Rafiq where you keep it, then press"
+                                : "Calibrated at your desk. Re-do it if you move desks") {
                             HStack { Spacer(); Button("Here") { fx.calibrateWalk() } }
                         }
                     }
@@ -285,9 +300,13 @@ struct SettingsPane: View {
                         }
                         .labelsHidden()
                     }
-                    Row(title: "Lock when I walk away",
-                        note: dev.lockWhenIdle ? "After \(dev.lockIdleMins) minutes with no keyboard or mouse"
-                                               : "Off") {
+                    // Renamed. Both settings used to be called walking away:
+                    // this one is a plain idle timer and has nothing to do
+                    // with Rafiq, the other one follows Rafiq's signal.
+                    Row(title: "Lock when idle",
+                        note: dev.lockWhenIdle
+                            ? "After \(dev.lockIdleMins) minutes with no keyboard or mouse. Rafiq is not involved"
+                            : "Off. A plain idle timer, nothing to do with Rafiq") {
                         HStack(spacing: 6) {
                             if dev.lockWhenIdle {
                                 Picker("", selection: Binding(get: { dev.lockIdleMins },

@@ -345,6 +345,15 @@ final class RobotLink: NSObject, ObservableObject {
             case "\u{2013}", "\u{2014}": out.append("-")
             case "\u{2026}": out.append("...")
             case "\n", "\r", "\t": out.append(" ")
+            // The field separator. Everything below 0x20 is dropped as a
+            // control character, and 0x1F is a control character, but it is
+            // also the thing that separates a card's title from its lines,
+            // an app name from the next app name, and a plate from a make.
+            // Dropping it glued every one of those into a single string, so
+            // the Mac health card, the top three tasks, the pinned task, the
+            // notification filter, VIPs, vehicle details and adding a WiFi
+            // network all arrived as nonsense and did nothing.
+            case "\u{1F}": out.unicodeScalars.append(u)
             default:
                 if u.value >= 0x20 && u.value < 0x7F { out.unicodeScalars.append(u) }
                 else {

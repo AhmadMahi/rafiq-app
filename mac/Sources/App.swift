@@ -79,6 +79,7 @@ struct Panel: View {
     @State private var showRemind = false
     @State private var showPhrases = false
     @State private var showRobot = false
+    @State private var showNotes = false
     @State private var showGestures = false
     @FocusState private var typing: Bool
     @Environment(\.colorScheme) private var systemScheme
@@ -109,7 +110,7 @@ struct Panel: View {
 
     private func closeOthers(except keep: Page) {
         if keep != .settings { showSettings = false }
-        if keep != .robot    { showRobot = false }
+        if keep != .robot    { showRobot = false; showNotes = false }
         if keep != .focus    { showFocus = false }
         if keep != .breakNow { showBreak = false }
         if keep != .remind   { showRemind = false }
@@ -234,6 +235,8 @@ struct Panel: View {
             scrolling { SettingsPane(showing: $showSettings) }
         } else if showGestures {
             scrolling { GesturePane(showing: $showGestures) }
+        } else if showNotes {
+            scrolling { RobotSettings(showing: $showNotes, start: .filters) }
         } else if showRobot {
             scrolling { RobotSettings(showing: $showRobot) }
         } else if dev.pairing {
@@ -434,9 +437,14 @@ struct Panel: View {
                 ges.on.toggle()
                 if ges.on { showGestures = true; closeOthers(except: .gestures) }
             }
-            Tile(icon: "arrow.triangle.2.circlepath", name: "Sync",
-                 detail: "WiFi minute", enabled: link.connected) {
-                dev.syncRobot()
+            // Notifications takes this place. Sync has moved into the
+            // robot's own settings: it is a thing you do once in a while,
+            // and the filter is a thing you reach for.
+            Tile(icon: "bell.badge", name: "Notifications",
+                 detail: link.muted.isEmpty ? "every app" : "\(link.muted.count) off",
+                 enabled: link.connected) {
+                link.readList()
+                showNotes = true; closeOthers(except: .robot)
             }
             Tile(icon: "moon.zzz", name: "Sleep",
                  detail: dev.blocked(.deepSleep) ?? "touch wakes",

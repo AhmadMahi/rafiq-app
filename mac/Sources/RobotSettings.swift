@@ -8,12 +8,19 @@ import SwiftUI
 struct RobotSettings: View {
     @EnvironmentObject var dev: Device
     @Binding var showing: Bool
+    /// Which page to land on. The grid's Notifications tile opens the
+    /// filter directly rather than making you find it in the list.
+    var start: Page? = nil
 
     @State private var page: Page? = nil
     enum Page: Hashable { case filters, brightness, face, sleep, tap, nets, turn, popup, eyes,
                           battery, power, network, vehicle, firmware, reset }
 
     var body: some View {
+        content.onAppear { if let s = start, page == nil { page = s } }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
             // The whole row goes back, not just the chevron. Hitting a
             // nine pixel arrow with a mouse is a chore, and the title
@@ -108,6 +115,10 @@ struct RobotSettings: View {
             }
             Tile(icon: "arrow.down.circle", name: "Update",
                  detail: dev.version.isEmpty ? "from a file" : dev.version) { page = .firmware }
+            // Moved off the main grid to make room for Notifications.
+            // Syncing is occasional; the filter is not.
+            Tile(icon: "arrow.triangle.2.circlepath", name: "Sync",
+                 detail: "WiFi minute") { dev.syncRobot() }
             Tile(icon: "arrow.counterclockwise", name: "Reset",
                  detail: "settings only") { page = .reset }
             Tile(icon: "antenna.radiowaves.left.and.right", name: "Network",
@@ -207,16 +218,28 @@ struct RobotSettings: View {
                                      : "\(dev.battPct)%  ·  \(String(format: "%.2f", dev.battV))V")
                     .font(.system(size: 13, weight: .medium))
                 Divider()
-                Text("Full charge").font(.system(size: 11, weight: .medium))
-                Choice(names: ["3.95V", "4.00V", "4.05V", "4.10V", "4.15V", "4.20V"],
-                       current: max(0, min(5, Int(((dev.battFull - 3.95) / 0.05).rounded())))) { i in
-                    Task { await dev.setBattFull(3.95 + Double(i) * 0.05); await dev.refresh() }
+                HStack {
+                    Text("Full charge").font(.system(size: 12))
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { max(0, min(6, Int(((dev.battFull - 3.95) / 0.05).rounded()))) },
+                        set: { i in Task { await dev.setBattFull(3.95 + Double(i) * 0.05)
+                                           await dev.refresh() } })) {
+                        ForEach(0..<7, id: \.self) { i in
+                            Text(String(format: "%.2fV", 3.95 + Double(i) * 0.05)).tag(i)
+                        }
+                    }
+                    .labelsHidden().frame(width: 92)
                 }
                 Text("Charge it fully, measure the pack, and pick what you measured. "
                      + "Everything scales from it, so the top of the charge reads as "
                      + "the top of the scale.")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                Divider()
+                // The log belongs next to the thing it measures, not in a
+                // different pane two taps away.
+                BatteryLogPane()
             }
 
         case .power:
@@ -310,6 +333,7 @@ struct RobotSettings: View {
 struct ResetButton: View {
     @EnvironmentObject var dev: Device
     @State private var asking = false
+    @State private var typed = ""
 
     var body: some View {
         if asking {
@@ -318,10 +342,20 @@ struct ResetButton: View {
                     .font(.system(size: 11))
                 Text("Networks, pairing and the reads stay.")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
+                // A button you can hit by accident is not a confirmation.
+                Text("Type RESET to confirm.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                TextField("RESET", text: $typed)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 12))
+                    .frame(width: 140)
                 HStack {
-                    Button("Reset") { asking = false; Task { await dev.resetSettings() } }
-                        .font(.system(size: 11))
-                    Button("Cancel") { asking = false }.font(.system(size: 11))
+                    Button("Reset") {
+                        asking = false; typed = ""
+                        Task { await dev.resetSettings() }
+                    }
+                    .font(.system(size: 11))
+                    .disabled(typed != "RESET")
+                    Button("Cancel") { asking = false; typed = "" }.font(.system(size: 11))
                 }
             }
         } else {
@@ -342,6 +376,47 @@ struct ResetButton: View {
 }
 
 /// One of a short list of options, picked by clicking it.
+/// The battery log, where the battery is.
+///
+/// It used to live only in the app's own settings, two panes away from
+/// Full charge, which is the number it is measured against.
+struct BatteryLogPane: View {
+    @ObservedObject private var diary = BatteryDiary.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Battery log").font(.system(size: 12, weight: .semibold))
+            if let c = diary.cycle {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Screen on \(BatteryDiary.hm(c.on))   Light sleep \(BatteryDiary.hm(c.light))")
+                    Text("Dark, awake \(BatteryDiary.hm(c.dark))   Deep sleep \(BatteryDiary.hm(c.deep))")
+                    Text("WiFi \(BatteryDiary.hm(c.wifi))   Wakes \(c.wakes)   Restarts \(c.restarts)")
+                }
+                .font(.system(size: 11, design: .monospaced))
+                if let n = diary.lightSleepNote {
+                    Text(n).font(.system(size: 10)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Text("Starts once Rafiq is linked; a reading every ten minutes.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("New cycle at").font(.system(size: 11))
+                Spacer()
+                Picker("", selection: $diary.resetAt) {
+                    ForEach(0..<4, id: \.self) { i in Text(BatteryDiary.resetVolts[i]).tag(i) }
+                }
+                .labelsHidden().frame(width: 92)
+            }
+            Text("Since the last full charge. The app's own settings keep the "
+                 + "longer diary and the CSV.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 struct Choice: View {
     let names: [String]
     let current: Int
@@ -880,24 +955,43 @@ struct FilterPane: View {
     @ObservedObject private var link = RobotLink.shared
     @State private var vipText = ""
 
+    /// Ask the robot what it now thinks, rather than trusting what we just
+    /// sent. Coming back to this page used to show the old state because
+    /// nothing ever re-read the list after writing to it.
+    private func reread() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { link.readList() }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("Apps").font(.system(size: 12, weight: .semibold))
+            HStack {
+                Text("Apps").font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button("All on")  { link.setMuted([]);          reread() }
+                    .font(.system(size: 11)).disabled(link.apps.isEmpty)
+                Button("All off") { link.setMuted(link.apps);   reread() }
+                    .font(.system(size: 11)).disabled(link.apps.isEmpty)
+            }
             if link.apps.isEmpty {
                 Text("Apps appear here once Rafiq has had a notification from each.")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
             ForEach(link.apps, id: \.self) { a in
-                Toggle(isOn: Binding(
-                    get: { !link.muted.contains(where: { $0.caseInsensitiveCompare(a) == .orderedSame }) },
-                    set: { on in
-                        var m = link.muted.filter { $0.caseInsensitiveCompare(a) != .orderedSame }
-                        if !on { m.append(a) }
-                        link.setMuted(m)
-                    })) {
+                // Label left, switch hard right, so a column of them lines up
+                // instead of each switch sitting against its own word.
+                HStack {
                     Text(a).font(.system(size: 12))
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { !link.muted.contains(where: { $0.caseInsensitiveCompare(a) == .orderedSame }) },
+                        set: { on in
+                            var m = link.muted.filter { $0.caseInsensitiveCompare(a) != .orderedSame }
+                            if !on { m.append(a) }
+                            link.setMuted(m)
+                            reread()
+                        }))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.small)
                 }
-                .toggleStyle(.switch).controlSize(.small)
             }
             Divider()
             Text("Always show").font(.system(size: 12, weight: .semibold))
@@ -908,11 +1002,12 @@ struct FilterPane: View {
                 TextField("Shukrana, urgent", text: $vipText).textFieldStyle(.roundedBorder).font(.system(size: 12))
                 Button("Save") {
                     link.setVips(vipText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+                    reread()
                 }
                 .font(.system(size: 11))
             }
         }
-        .onAppear { vipText = link.vips.joined(separator: ", ") }
+        .onAppear { link.readList(); vipText = link.vips.joined(separator: ", ") }
         .onChange(of: link.vips) { _, v in vipText = v.joined(separator: ", ") }
     }
 }

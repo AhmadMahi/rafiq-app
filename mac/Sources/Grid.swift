@@ -267,6 +267,17 @@ struct RemindSheet: View {
                         .buttonStyle(.plain)
                     }
                 }
+                // The eight buttons are the common ones. Anything else from
+                // one minute to an hour comes from here, because "remind me
+                // in 7 minutes" was not reachable at all before.
+                HStack(spacing: 6) {
+                    Text("or").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Picker("", selection: $mins) {
+                        ForEach(1...60, id: \.self) { m in Text("\(m) min").tag(m) }
+                    }
+                    .labelsHidden().frame(width: 100)
+                    Spacer()
+                }
             } else {
                 // A DatePicker field cannot be typed into inside a menu bar
                 // window: it never takes keyboard focus, so the time could
@@ -392,9 +403,9 @@ struct RemindSheet: View {
         editText = r.text
         let c = Calendar.current.dateComponents([.hour, .minute], from: r.fireAt)
         editHour = c.hour ?? 0
-        // The menu offers every fifth minute, so a reminder set to 09:07
-        // by a URL has to land on one of them or the picker shows blank.
-        editMinute = ((c.minute ?? 0) / 5) * 5
+        // Every minute is offered now, so nothing has to be rounded to make
+        // the picker show something. 09:07 edits as 09:07.
+        editMinute = c.minute ?? 0
         editing = r.id
     }
 
@@ -454,7 +465,7 @@ struct ClockPickers: View {
             .labelsHidden().frame(width: 68)
             Text(":").foregroundStyle(.secondary)
             Picker("", selection: $minute) {
-                ForEach(Array(stride(from: 0, to: 60, by: 5)), id: \.self) { m in
+                ForEach(0..<60, id: \.self) { m in
                     Text(String(format: "%02d", m)).tag(m)
                 }
             }
