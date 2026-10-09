@@ -142,6 +142,7 @@ final class RobotLink: NSObject, ObservableObject {
         guard !Device.inert else { return }
         central = CBCentralManager(delegate: self, queue: .main)
         Features.shared.start()               // the Mac batch: timers and observers, once
+        BatteryDiary.shared.start()           // 4.5: the battery diary
     }
 
     // ---------------------------------------------------------------

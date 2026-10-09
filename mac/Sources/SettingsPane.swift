@@ -55,6 +55,8 @@ struct SettingsPane: View {
     @ObservedObject private var up = Updater.shared
     @ObservedObject private var link = RobotLink.shared
     @ObservedObject private var fx = Features.shared
+    @ObservedObject private var diary = BatteryDiary.shared
+    @State private var capText = ""
     @State private var pinText = ""
     @Binding var showing: Bool
 
@@ -183,6 +185,53 @@ struct SettingsPane: View {
                     }
                 }
 
+                // 4.5: where the battery goes. The robot keeps one charge
+                // cycle; this Mac keeps every reading until cleared.
+                Group2(title: "Battery") {
+                    if let c = diary.cycle {
+                        Row(title: "Since full", note: "Robot's own log; estimated mAh in brackets") {
+                            EmptyView()
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Screen on \(BatteryDiary.hm(c.on))   Light sleep \(BatteryDiary.hm(c.light))")
+                            Text("Dark, awake \(BatteryDiary.hm(c.dark))   Deep sleep \(BatteryDiary.hm(c.deep))")
+                            Text("WiFi \(BatteryDiary.hm(c.wifi))   Wakes \(c.wakes)   Restarts \(c.restarts)")
+                        }
+                        .font(.system(size: 11, design: .monospaced))
+                        if let n = diary.lightSleepNote {
+                            Text(n).font(.system(size: 10)).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else {
+                        Row(title: "Diary", note: "Starts once Rafiq 7.8 is linked; a reading every ten minutes") { EmptyView() }
+                    }
+                    Row(title: "Real drain", note: "From how fast the percentage falls") {
+                        Text("6 h: " + mA(diary.drain(hours: 6)) + "   24 h: " + mA(diary.drain(hours: 24)))
+                            .font(.system(size: 11))
+                    }
+                    fxToggle("Keep a diary", "\(diary.entries.count) readings kept on this Mac", $diary.keep)
+                    Row(title: "New cycle at", note: "The robot starts a new log when the battery reaches this") {
+                        Picker("", selection: $diary.resetAt) {
+                            ForEach(0..<4, id: \.self) { i in Text(BatteryDiary.resetVolts[i]).tag(i) }
+                        }
+                        .labelsHidden().frame(width: 90)
+                    }
+                    Row(title: "Battery size", note: "mAh, for turning percent into mAh") {
+                        HStack(spacing: 4) {
+                            TextField("350", text: $capText).textFieldStyle(.roundedBorder).frame(width: 60)
+                            Button("Set") { if let v = Int(capText), v >= 50 { diary.capacity = v } }
+                        }
+                        .font(.system(size: 11))
+                    }
+                    HStack(spacing: 8) {
+                        Button("New cycle now") { dev.command("!cfg blogreset 1", say: "A new battery log") }
+                        Button("Export CSV") { diary.exportCSV() }
+                        Button("Clear diary") { diary.clear() }
+                    }
+                    .font(.system(size: 11))
+                }
+                .onAppear { capText = String(diary.capacity) }
+
                 if dev.useWifi {
                 Group2(title: "WiFi") {
                     Row(title: "Address", note: "SYSTEM on the robot shows it") {
@@ -306,6 +355,11 @@ struct SettingsPane: View {
             }
         }
         .onAppear { addr = dev.ip }
+    }
+
+    private func mA(_ v: Double?) -> String {
+        guard let v else { return "--" }
+        return String(format: "%.1f mA", v)
     }
 
     private func fxToggle(_ t: String, _ n: String, _ b: Binding<Bool>) -> some View {
