@@ -141,8 +141,10 @@ struct SettingsPane: View {
                              "Uses Rafiq. Carry it away and this Mac locks and the screen goes off; come back and the screen wakes for your password",
                              $fx.walkAway)
                     if fx.walkAway {
-                        Row(title: "Locks when Rafiq is",
-                            note: "Radio indoors is not a tape measure, so these are approximate") {
+                        // "Locks when Rafiq is" left five points of margin
+                        // beside a 160pt picker, which is not margin.
+                        Row(title: "Locks at",
+                            note: "How far Rafiq gets before this Mac locks. Radio indoors is not a tape measure, so these are approximate") {
                             Picker("", selection: Binding(get: { fx.walkRange },
                                                           set: { fx.walkRange = $0 })) {
                                 Text("2 m").tag(0)
@@ -226,22 +228,38 @@ struct SettingsPane: View {
                          + "over the same Bluetooth link as everything else.")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Row(title: "OpenAI key",
-                        note: reads.hasKey ? "Kept in this Mac's keychain" : "Needed before anything can be written") {
-                        HStack(spacing: 4) {
-                            if keyShown {
-                                TextField("sk-...", text: $keyText)
-                                    .textFieldStyle(.roundedBorder).frame(width: 150)
-                            } else {
-                                SecureField(reads.hasKey ? "................" : "sk-...", text: $keyText)
-                                    .textFieldStyle(.roundedBorder).frame(width: 150)
+                    // Not a Row. Row puts the label on the left and pins
+                    // its content to the right at full width, and a 150
+                    // point field with two buttons beside it leaves the
+                    // label about one character wide, which is how
+                    // "OpenAI key" came to be printed down the screen a
+                    // letter at a time. A field this size belongs on its
+                    // own line.
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("OpenAI key").font(.system(size: 12))
+                        Text(reads.hasKey ? "Kept in this Mac's keychain"
+                                          : "Needed before anything can be written")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 6) {
+                            Group {
+                                if keyShown {
+                                    TextField("sk-...", text: $keyText)
+                                } else {
+                                    SecureField(reads.hasKey ? "................" : "sk-...",
+                                                text: $keyText)
+                                }
                             }
+                            .textFieldStyle(.roundedBorder)
+                            .frame(minWidth: 90)
                             Button(keyShown ? "Hide" : "Show") { keyShown.toggle() }
                             Button("Save") { reads.key = keyText; keyText = "" }
                                 .disabled(keyText.isEmpty)
                         }
                         .font(.system(size: 11))
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 2)
                     fxToggle("Write them on their own", "While there is room on the shelf", $reads.auto)
                     if reads.auto {
                         Row(title: "A new one every", note: "Only while the shelf has room") {

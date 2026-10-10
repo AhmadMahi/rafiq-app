@@ -168,12 +168,33 @@ final class RobotLink: NSObject, ObservableObject {
 
     /// True when it went out. The robot's status is read again a moment
     /// later, so what the panel shows follows what was done.
+    /// What fits in ONE write, rather than what CoreBluetooth will accept.
+    ///
+    /// maximumWriteValueLength(for: .withResponse) reports what a long
+    /// write can carry, and a long write is several round trips behind
+    /// the scenes. At the resting rhythm that is most of a second each,
+    /// which is why sending a story took so long. Anything built out of
+    /// pieces should size them to this instead.
+    var singleWriteRoom: Int {
+        guard let p = peripheral else { return 20 }
+        // withoutResponse is the single packet payload, MTU minus three,
+        // and cannot be long written. That is exactly the number wanted.
+        return max(20, p.maximumWriteValueLength(for: .withoutResponse))
+    }
+
     @discardableResult
     func send(_ command: String) -> Bool {
         guard connected, let p = peripheral, let c = cmdChr else { return false }
         let room = max(20, p.maximumWriteValueLength(for: .withResponse))
         var bytes = Array(Self.ascii(command).utf8)
-        if bytes.count > room { bytes = Array(bytes.prefix(room)) }
+        if bytes.count > room {
+            // Silently cutting a command is how a piece of a story
+            // arrives without the bar that marks its end, gets dropped
+            // by the robot, and the whole thing fails a length check
+            // several seconds later with nothing to say why.
+            NSLog("Rafiq: command of \(bytes.count) bytes cut to \(room)")
+            bytes = Array(bytes.prefix(room))
+        }
         p.writeValue(Data(bytes), for: c, type: .withResponse)
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 900_000_000)

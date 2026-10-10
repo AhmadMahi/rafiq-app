@@ -144,13 +144,20 @@ final class Reads: ObservableObject {
         let safe = String(RobotLink.ascii(text.replacingOccurrences(of: "\n", with: "\u{1E}"))
                           .prefix(6000))
         outLen = safe.count
-        outChunks = stride(from: 0, to: safe.count, by: 360).map {
+        // Sized to one write rather than a round number. 360 plus the
+        // "!read+ |" fence is 369 bytes, past what a single packet
+        // holds, so CoreBluetooth sent each piece as a long write:
+        // several round trips behind the scenes, each one a connection
+        // interval, which is where the minute went. Nine bytes of
+        // fence, and a floor so a small MTU cannot make this crawl.
+        let step = max(80, link.singleWriteRoom - 9)
+        outChunks = stride(from: 0, to: safe.count, by: step).map {
             let a = safe.index(safe.startIndex, offsetBy: $0)
-            let b = safe.index(a, offsetBy: min(360, safe.count - $0))
+            let b = safe.index(a, offsetBy: min(step, safe.count - $0))
             return String(safe[a..<b])
         }
         outAt = 0; sending = true; retried = false
-        state = "Sending"
+        state = "Sending piece 1 of \(outChunks.count)"
         link.send("!read begin")
     }
 
@@ -161,6 +168,7 @@ final class Reads: ObservableObject {
             guard sending else { return true }
             if outAt < outChunks.count {
                 let c = outChunks[outAt]; outAt += 1
+                state = "Sending piece \(outAt) of \(outChunks.count)"
                 // Fenced with bars. Every command goes through ascii(),
                 // which trims the ends, so a piece that happened to end
                 // on a space would arrive one character shorter than the
