@@ -159,6 +159,8 @@ final class RobotLink: NSObject, ObservableObject {
     var firmware: String { stat["fw"] ?? "" }
     var relaxing: Bool { stat["relax"] == "1" }
     var following: Bool { stat["follow"] == "1" }
+    /// How many short reads are on the robot's shelf (firmware 7.11).
+    var readsOnShelf: Int { stat["rds"].flatMap(Int.init) ?? 0 }
 
     // ---------------------------------------------------------------
     //  sending
@@ -369,6 +371,11 @@ final class RobotLink: NSObject, ObservableObject {
             // notification filter, VIPs, vehicle details and adding a WiFi
             // network all arrived as nonsense and did nothing.
             case "\u{1F}": out.unicodeScalars.append(u)
+            // 0x1E stands in for a newline while a short read is being
+            // sent, because a real one is flattened to a space just
+            // below and the blank line after the title is the only
+            // thing that makes it a title.
+            case "\u{1E}": out.unicodeScalars.append(u)
             default:
                 if u.value >= 0x20 && u.value < 0x7F { out.unicodeScalars.append(u) }
                 else {
@@ -518,7 +525,8 @@ extension RobotLink: CBPeripheralDelegate {
             if c.uuid == RobotLink.uEvt, let v, let s = String(data: v, encoding: .ascii), !s.isEmpty {
                 // the Mac's own features first (calls, meetings, slides, the
                 // knob, screenshots, prayer, tasks, updates), then your gestures
-                if !Features.shared.handle(s) { Gestures.shared.heardBluetooth(s) }
+                if Reads.shared.heard(s) { }
+                else if !Features.shared.handle(s) { Gestures.shared.heardBluetooth(s) }
             }
             if c.uuid == RobotLink.uLst, let v, let s = String(data: v, encoding: .utf8),
                let j = try? JSONSerialization.jsonObject(with: Data(s.utf8)) as? [String: Any] {

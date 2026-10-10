@@ -56,6 +56,9 @@ struct SettingsPane: View {
     @ObservedObject private var link = RobotLink.shared
     @ObservedObject private var fx = Features.shared
     @ObservedObject private var diary = BatteryDiary.shared
+    @ObservedObject private var reads = Reads.shared
+    @State private var keyText = ""
+    @State private var keyShown = false
     @State private var capText = ""
     @State private var pinText = ""
     @Binding var showing: Bool
@@ -187,7 +190,21 @@ struct SettingsPane: View {
                             .font(.system(size: 11))
                         }
                     }
-                    fxToggle("Weather and prayer times", "Sent from this Mac each day, so Rafiq never needs WiFi for them", $fx.skyFromMac)
+                    fxToggle("Weather and prayer times",
+                             "Fetched here and sent across, so Rafiq never needs WiFi for them. "
+                             + "Prayer times once a day, the weather more often. Your location, "
+                             + "or Bangalore if the Mac will not say.",
+                             $fx.skyFromMac)
+                    if fx.skyFromMac {
+                        Row(title: "Weather every", note: "Prayer times are a day's worth and go once a day") {
+                            Picker("", selection: Binding(get: { fx.wxHours },
+                                                          set: { fx.wxHours = $0 })) {
+                                Text("1 h").tag(1); Text("2 h").tag(2)
+                                Text("3 h").tag(3); Text("6 h").tag(6)
+                            }
+                            .labelsHidden().frame(width: 76)
+                        }
+                    }
                     fxToggle("Low battery warning", "A notification on this Mac at 20% and 10%", $fx.lowBatt)
                     fxToggle("Last seen", fx.lastSeen.isEmpty ? "Remembers when and where Rafiq was last with this Mac" : fx.lastSeen, $fx.lastSeenOn)
                     if !Keys.trusted && (fx.clicker || fx.shot) {
@@ -202,6 +219,64 @@ struct SettingsPane: View {
 
                 // 4.5: where the battery goes. The robot keeps one charge
                 // cycle; this Mac keeps every reading until cleared.
+
+                Group2(title: "Short reads") {
+                    Text("Rafiq used to write these itself over WiFi with the key kept on the "
+                         + "robot. This Mac does it now: the key stays here, and the story goes "
+                         + "over the same Bluetooth link as everything else.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Row(title: "OpenAI key",
+                        note: reads.hasKey ? "Kept in this Mac's keychain" : "Needed before anything can be written") {
+                        HStack(spacing: 4) {
+                            if keyShown {
+                                TextField("sk-...", text: $keyText)
+                                    .textFieldStyle(.roundedBorder).frame(width: 150)
+                            } else {
+                                SecureField(reads.hasKey ? "................" : "sk-...", text: $keyText)
+                                    .textFieldStyle(.roundedBorder).frame(width: 150)
+                            }
+                            Button(keyShown ? "Hide" : "Show") { keyShown.toggle() }
+                            Button("Save") { reads.key = keyText; keyText = "" }
+                                .disabled(keyText.isEmpty)
+                        }
+                        .font(.system(size: 11))
+                    }
+                    fxToggle("Write them on their own", "While there is room on the shelf", $reads.auto)
+                    if reads.auto {
+                        Row(title: "A new one every", note: "Only while the shelf has room") {
+                            Picker("", selection: $reads.everyDays) {
+                                Text("day").tag(1)
+                                Text("2 days").tag(2)
+                                Text("3 days").tag(3)
+                                Text("week").tag(7)
+                            }
+                            .labelsHidden().frame(width: 90)
+                        }
+                    }
+                    Row(title: "Keep on the shelf", note: "\(link.readsOnShelf) there now") {
+                        Picker("", selection: $reads.keep) {
+                            ForEach([5, 10, 15], id: \.self) { Text("\($0)").tag($0) }
+                        }
+                        .labelsHidden().frame(width: 64)
+                    }
+                    Row(title: "What to write", note: "Changed here, not in the firmware") { EmptyView() }
+                    TextEditor(text: $reads.prompt)
+                        .font(.system(size: 10, design: .monospaced))
+                        .frame(height: 86)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.15)))
+                    HStack {
+                        Button("Put the old one back") { reads.prompt = Reads.defaultPrompt }
+                        Spacer()
+                        Button("Write one now") { reads.fetchNow() }
+                            .disabled(!reads.hasKey || reads.busy || !link.full)
+                    }
+                    .font(.system(size: 11))
+                    if !reads.state.isEmpty {
+                        Text(reads.state).font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                }
+
                 Group2(title: "Battery") {
                     if let c = diary.cycle {
                         Row(title: "Since full", note: "Robot's own log; estimated mAh in brackets") {

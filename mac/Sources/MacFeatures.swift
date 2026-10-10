@@ -33,7 +33,7 @@ final class Features: NSObject, ObservableObject {
     @Published var lastSeenOn = flag("fSeen", true)   { didSet { save("fSeen", lastSeenOn); if lastSeenOn { askLocation() } } }
     @Published var lowBatt    = flag("fBatt", true)   { didSet { save("fBatt", lowBatt); if lowBatt { askNotify() } } }
     @Published var reminders  = flag("fRem", false)   { didSet { save("fRem", reminders); if reminders { askReminders() } else { clearTasks() } } }
-    @Published var skyFromMac = flag("fSky", false)   { didSet { save("fSky", skyFromMac); if skyFromMac { askLocation(); skyDay = "" ; tickSky() } } }
+    @Published var skyFromMac = flag("fSky", true)   { didSet { save("fSky", skyFromMac); if skyFromMac { askLocation(); skyDay = "" ; tickSky() } } }
     @Published var prayMinutes = UserDefaults.standard.object(forKey: "fPrayMin") as? Int ?? 15 {
         didSet { UserDefaults.standard.set(prayMinutes, forKey: "fPrayMin") } }
     @Published var walkLimit = UserDefaults.standard.object(forKey: "fWalkDb") as? Int ?? -85 {
@@ -132,6 +132,7 @@ final class Features: NSObject, ObservableObject {
         tickWalk()
     }
     private func everyMinute() {
+        Reads.shared.tick()
         tickHealth()
         tickBattery()
         tickSky()
@@ -158,6 +159,11 @@ final class Features: NSObject, ObservableObject {
         if ev.hasPrefix("pray ") { prayer(String(ev.dropFirst(5))); return true }
         if ev.hasPrefix("done ") { done(Int(ev.dropFirst(5)) ?? -1); return true }
         if ev.hasPrefix("kv ") { if knob { turn(Int(ev.dropFirst(3)) ?? 0) }; return true }
+        // The robot asking, rather than this Mac deciding. Sync on the
+        // robot, or holding on an empty shelf, comes through here.
+        if ev == "want read" { Reads.shared.askedFor(); return true }
+        if ev == "want sky"  { skyDay = ""; wxAt = .distantPast; skyTryAt = .distantPast
+                               tickSky(); return true }
         // a meeting: the pad, and only the pad, mutes and unmutes
         if meetMute && inCall && ev == "t1" { toggleMute(); return true }
         // presenting: knock next, lean back (lean forward next too)
@@ -495,6 +501,8 @@ final class Features: NSObject, ObservableObject {
     /// no weather until tomorrow. Nothing said so, either.
     private var wxAt = Date.distantPast
     private var skyTryAt = Date.distantPast
+    @Published var wxHours = UserDefaults.standard.object(forKey: "fWxHours") as? Int ?? 2 {
+        didSet { UserDefaults.standard.set(wxHours, forKey: "fWxHours") } }
     private func tickSky() {
         guard skyFromMac, link.full else { return }
         let day = Self.dayKey()
@@ -502,7 +510,7 @@ final class Features: NSObject, ObservableObject {
         // Prayer times are a day's worth. The weather is not: sending it
         // once a day meant the robot showed this morning's sky all
         // evening, so it goes again every hour.
-        let needWeather = Date().timeIntervalSince(wxAt) > 3600
+        let needWeather = Date().timeIntervalSince(wxAt) > Double(wxHours) * 3600
         guard needPrayer || needWeather else { return }
         // A failing call must be retried, but not sixty times an hour.
         guard Date().timeIntervalSince(skyTryAt) > 120 else { return }
@@ -577,9 +585,16 @@ final class Features: NSObject, ObservableObject {
         loc.delegate = self
         loc.requestWhenInUseAuthorization()
     }
+    /// Where to ask about, when the Mac will not say.
+    ///
+    /// Location can be refused, switched off, or simply not answer on a
+    /// desktop that has never seen a WiFi network it knows. Falling back
+    /// to a fixed place means the weather and the prayer times still
+    /// arrive, which is the point of the whole thing.
+    static let fallback = CLLocation(latitude: 12.9716, longitude: 77.5946)   // Bangalore
     private func locate(_ done: @escaping (CLLocation?) -> Void) {
         loc.delegate = self
-        locWaiters.append(done)
+        locWaiters.append { l in done(l ?? Features.fallback) }
         if locWaiters.count == 1 { loc.requestLocation() }
     }
     private func placeThen(_ done: @escaping (String?) -> Void) {
