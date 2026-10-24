@@ -385,13 +385,18 @@ struct Panel: View {
                 if link.timerLeft > 0 { dev.stopTimer() } else { showFocus = true; closeOthers(except: .focus) }
             }
             // While away it is the way back: Home, in so many words.
+            // A Zuno has an Away of its own, which arms a hub and its
+            // sensors. Same word, different thing, so it is not offered
+            // here rather than quietly doing the other one.
             Tile(icon: link.away ? "house" : "door.left.hand.open",
                  name: link.away ? "Home" : "Away",
-                 detail: link.away ? "end Away" : "message", on: link.away) {
+                 detail: link.lacks("away") ?? (link.away ? "end Away" : "message"),
+                 on: link.away, enabled: link.lacks("away") == nil && link.connected) {
                 if link.away { dev.endAway() } else { showAway = true; closeOthers(except: .away) }
             }
-            Tile(icon: "dot.radiowaves.left.and.right", name: "Find", detail: "call out",
-                 enabled: link.connected) {
+            Tile(icon: "dot.radiowaves.left.and.right", name: "Find",
+                 detail: link.lacks("find") ?? "call out",
+                 enabled: link.lacks("find") == nil && link.connected) {
                 dev.findRobot()
             }
 
@@ -401,7 +406,9 @@ struct Panel: View {
                  on: dev.relaxing, enabled: dev.blocked(.relax) == nil && link.connected) {
                 Task { await dev.setRelax(!dev.relaxing) }
             }
-            Tile(icon: "circle.dotted", name: "Zikr", detail: "count", enabled: link.connected) {
+            Tile(icon: "circle.dotted", name: "Zikr",
+                 detail: link.lacks("zikr") ?? "count",
+                 enabled: link.lacks("zikr") == nil && link.connected) {
                 dev.zikr()
             }
             Tile(icon: "eyes", name: "Follow",

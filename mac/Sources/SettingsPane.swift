@@ -119,16 +119,43 @@ struct SettingsPane: View {
                                 })).labelsHidden().toggleStyle(.switch)
                         }
                     }
-                    Row(title: "Robot", note: "after a reset, or for another Rafiq") {
-                        Button("Forget and look again") { link.forget() }
-                            .font(.system(size: 11))
+                    // One at a time: a Rafiq and a Zuno both answer to
+                    // the same service, and the panel speaks to one.
+                    Row(title: "Robot",
+                        note: link.found.count > 1
+                            ? "More than one answered. Pick the one this Mac follows."
+                            : "Whichever is on, or name one. Also after a reset.") {
+                        HStack(spacing: 8) {
+                            Spacer()
+                            Picker("", selection: Binding(
+                                get: { link.prefer },
+                                set: { link.choose($0) })) {
+                                Text("Whichever is on").tag("")
+                                ForEach(link.found) { d in Text(d.name).tag(d.name) }
+                                if !link.prefer.isEmpty
+                                    && !link.found.contains(where: { $0.name == link.prefer }) {
+                                    Text(link.prefer).tag(link.prefer)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 160)
+                            Button("Look again") { link.forget() }
+                                .font(.system(size: 11))
+                        }
                     }
                 }
 
                 // 4.3: what the robot and this Mac do for each other.
-                Group2(title: "Rafiq and this Mac") {
+                Group2(title: "\(link.shortName.capitalized) and this Mac") {
                     if !link.full {
                         Row(title: "Needs Rafiq 7.5", note: "Most of this works once the robot is updated") { EmptyView() }
+                    }
+                    if link.isZuno {
+                        Row(title: "This is a Zuno",
+                            note: "It works out its own prayer times, and it has no cursor to "
+                                + "follow, so Follow stays off. Everything else below is the same.") {
+                            EmptyView()
+                        }
                     }
                     fxToggle("Meeting mute", "In a call, a tap on the pad mutes this Mac's microphone; the next tap unmutes", $fx.meetMute)
                     fxToggle("Presentation clicker", "In Keynote, PowerPoint or a browser: knock for next, lean for back", $fx.clicker)

@@ -40,6 +40,43 @@ final class RobotLink: NSObject, ObservableObject {
     @Published private(set) var connected = false
     @Published private(set) var stat: [String: String] = [:]
     @Published private(set) var name = ""
+    /// Everything seen in the last scan that could be ours, so the
+    /// Settings pane can offer a choice when there is more than one.
+    @Published private(set) var found: [Seen] = []
+    struct Seen: Identifiable, Equatable { let id: UUID; let name: String }
+
+    /// A Rafiq or a Zuno: both speak the same service, so both are ours.
+    /// The name is the only thing an advert carries that tells them
+    /// apart, and the service UUID will not fit in the 31 bytes.
+    nonisolated static func ours(_ n: String) -> Bool { n.hasPrefix("Rafiq") || n.hasPrefix("Zuno") }
+
+    /// One robot at a time. Empty means whichever answers first; set to
+    /// a name, only that one is attached to, so a Rafiq and a Zuno on
+    /// the same desk do not take turns.
+    @Published var prefer: String = UserDefaults.standard.string(forKey: "preferDevice") ?? "" {
+        didSet { UserDefaults.standard.set(prefer, forKey: "preferDevice") }
+    }
+
+    /// What to call it on screen before it has said anything.
+    var shortName: String { name.isEmpty ? "the robot" : name }
+
+    /// What answered. A Rafiq says nothing, so an absent key is a Rafiq.
+    var kind: String { stat["kind"] ?? "rafiq" }
+    var isZuno: Bool { kind == "zuno" }
+    /// The device's own word for what it can do. A Rafiq sends no list
+    /// and has everything, so an empty list means "all of it" rather
+    /// than "none of it" -- getting that backwards would grey out the
+    /// whole panel for every robot already in the field.
+    var caps: Set<String> {
+        Set((stat["caps"] ?? "").split(separator: ",").map(String.init))
+    }
+    func can(_ c: String) -> Bool { caps.isEmpty || caps.contains(c) }
+    /// Why a tile is not available on whatever is connected, or nil when
+    /// it is. Named after the robot, because "not on Zuno" tells you
+    /// what to do about it and "unavailable" does not.
+    func lacks(_ c: String) -> String? {
+        can(c) ? nil : "not on \(name.isEmpty ? "this one" : name)"
+    }
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -287,6 +324,18 @@ final class RobotLink: NSObject, ObservableObject {
         }
     }
 
+    /// Is this the one we are meant to be on? With no preference, the
+    /// first to answer; with one, only that name.
+    func wanted(_ n: String) -> Bool { prefer.isEmpty || n == prefer }
+
+    /// Switch to another robot, or back to "whichever answers first".
+    /// Drops the one we are on, because the panel speaks to one at a
+    /// time and two half-connected robots is worse than either.
+    func choose(_ name: String) {
+        prefer = name
+        forget()
+    }
+
     /// Forget this robot and look again, for a new one or after a reset.
     func forget() {
         if let p = peripheral { central.cancelPeripheralConnection(p) }
@@ -311,11 +360,13 @@ final class RobotLink: NSObject, ObservableObject {
         }
         // One macOS is already holding (the robot advertises HID).
         if let p = central.retrieveConnectedPeripherals(withServices: [RobotLink.uSvc, RobotLink.uHid])
-            .first(where: { ($0.name ?? "").hasPrefix("Rafiq") }) {
+            .first(where: { RobotLink.ours($0.name ?? "") && wanted($0.name ?? "") }) {
             attach(p)
             return
         }
-        state = "Looking for Rafiq. Touch it to wake it."
+        state = prefer.isEmpty ? "Looking for your robot. Touch it to wake it."
+                               : "Looking for \(prefer). Touch it to wake it."
+        found = []
         central.scanForPeripherals(withServices: nil, options: nil)
     }
 
@@ -324,7 +375,7 @@ final class RobotLink: NSObject, ObservableObject {
         peripheral = p
         p.delegate = self
         savedId = p.identifier
-        name = p.name ?? "Rafiq"
+        name = p.name ?? "Robot"
         state = "Connecting to \(name)"
         // A pending connect never times out: macOS completes it whenever
         // the robot is next in range, which is exactly what is wanted.
@@ -442,9 +493,14 @@ extension RobotLink: CBCentralManagerDelegate {
     nonisolated func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral,
                                     advertisementData ad: [String: Any], rssi: NSNumber) {
         let n = (ad[CBAdvertisementDataLocalNameKey] as? String) ?? p.name ?? ""
-        guard n.hasPrefix("Rafiq") else { return }
+        guard RobotLink.ours(n) else { return }
         MainActor.assumeIsolated {
-            guard self.peripheral == nil else { return }
+            // Remember it either way, so the Settings pane can show what
+            // is around even while we are busy with one of them.
+            if !self.found.contains(where: { $0.id == p.identifier }) {
+                self.found.append(Seen(id: p.identifier, name: n))
+            }
+            guard self.peripheral == nil, self.wanted(n) else { return }
             self.attach(p)
         }
     }

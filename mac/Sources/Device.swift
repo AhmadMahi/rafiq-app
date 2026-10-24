@@ -162,15 +162,20 @@ final class Device: ObservableObject {
     func blocked(_ what: Tool) -> String? {
         switch what {
         case .breakNow:
+            if let w = RobotLink.shared.lacks("dnd") { return w }
             // A break locks the screen, which is the opposite of focusing.
             return focusRunning ? "during focus" : nil
         case .deepSleep:
+            if let w = RobotLink.shared.lacks("deep") { return w }
             // Sleeping would take the countdown with it.
             return focusRunning ? "after focus" : (breakRunning ? "on a break" : nil)
         case .relax:
+            if let w = RobotLink.shared.lacks("relax") { return w }
             // The robot can only hold one of these on its panel.
             return following ? "following" : nil
         case .follow:
+            // A Zuno has no cursor to move, and says so in its caps.
+            if let w = RobotLink.shared.lacks("follow") { return w }
             return relaxing ? "relaxing" : nil
         }
     }
