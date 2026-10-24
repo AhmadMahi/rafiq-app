@@ -175,6 +175,12 @@ final class Features: NSObject, ObservableObject {
             }
         }
         if shot && ev == "k3" { screenshot(); return true }
+        // Turning a Zuno face down mutes this Mac; turning it back lets
+        // it speak again. Only while in a call, and only when the state
+        // actually needs changing, so putting it down on a desk between
+        // calls does nothing.
+        if ev == "fd", inCall, !mutedByUs { toggleMute(); return true }
+        if ev == "fu", inCall, mutedByUs  { toggleMute(); return true }
         return false
     }
 
@@ -503,6 +509,13 @@ final class Features: NSObject, ObservableObject {
     private var skyTryAt = Date.distantPast
     @Published var wxHours = UserDefaults.standard.object(forKey: "fWxHours") as? Int ?? 2 {
         didSet { UserDefaults.standard.set(wxHours, forKey: "fWxHours") } }
+    /// Sync, from the panel: the clock now, and the sky fetched fresh
+    /// rather than whenever the hour happens to be up.
+    func syncNow() {
+        link.pushTime()
+        skyDay = ""; wxAt = .distantPast; skyTryAt = .distantPast
+        tickSky()
+    }
     private func tickSky() {
         guard skyFromMac, link.full else { return }
         let day = Self.dayKey()

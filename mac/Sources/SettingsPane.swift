@@ -123,14 +123,14 @@ struct SettingsPane: View {
                     // the same service, and the panel speaks to one.
                     Row(title: "Robot",
                         note: link.found.count > 1
-                            ? "More than one answered. Pick the one this Mac follows."
-                            : "Whichever is on, or name one. Also after a reset.") {
+                            ? "More than one answered. Pick one."
+                            : "Any, or name one. Also after a reset.") {
                         HStack(spacing: 8) {
                             Spacer()
                             Picker("", selection: Binding(
                                 get: { link.prefer },
                                 set: { link.choose($0) })) {
-                                Text("Whichever is on").tag("")
+                                Text("Any").tag("")
                                 ForEach(link.found) { d in Text(d.name).tag(d.name) }
                                 if !link.prefer.isEmpty
                                     && !link.found.contains(where: { $0.name == link.prefer }) {
@@ -138,7 +138,7 @@ struct SettingsPane: View {
                                 }
                             }
                             .labelsHidden()
-                            .frame(width: 160)
+                            .frame(width: 104)
                             Button("Look again") { link.forget() }
                                 .font(.system(size: 11))
                         }

@@ -13,6 +13,10 @@ struct RobotSettings: View {
     var start: Page? = nil
 
     @State private var page: Page? = nil
+    /// A Zuno driving a Mac has no use for most of this. The ones left
+    /// out are not hidden to be tidy: they either do nothing on this
+    /// device, or they would take it out of Mac mode without saying so.
+    private var pared: Bool { RobotLink.shared.isZuno && RobotLink.shared.macMode }
     enum Page: Hashable { case filters, brightness, face, sleep, tap, nets, turn, popup, eyes,
                           battery, power, network, vehicle, firmware, reset }
 
@@ -88,27 +92,32 @@ struct RobotSettings: View {
                  detail: Device.brightNames[safe: dev.bri == 0 ? 0 : brightIndex] ?? "") { page = .brightness }
             Tile(icon: "clock", name: "Watch face",
                  detail: Device.faceNames[safe: dev.face] ?? "") { page = .face }
-            Tile(icon: "moon", name: "Sleep after",
-                 detail: Device.sleepNames[safe: dev.slpi] ?? "") { page = .sleep }
-
-            Tile(icon: "hand.tap", name: "Controls",
-                 detail: dev.knock ? "touch + knock" : "touch") { page = .tap }
-            Tile(icon: "wifi", name: "Networks",
-                 detail: dev.nets.isEmpty ? "none" : "\(dev.nets.count) saved") { page = .nets }
+            if !pared {
+                Tile(icon: "moon", name: "Sleep after",
+                     detail: Device.sleepNames[safe: dev.slpi] ?? "") { page = .sleep }
+                Tile(icon: "hand.tap", name: "Controls",
+                     detail: dev.knock ? "touch + knock" : "touch") { page = .tap }
+                Tile(icon: "wifi", name: "Networks",
+                     detail: dev.nets.isEmpty ? "none" : "\(dev.nets.count) saved") { page = .nets }
+            }
             Tile(icon: "doc.plaintext", name: "Page turn",
                  detail: dev.autoTurn ? "auto" : "knock") { page = .turn }
 
-            Tile(icon: "bubble.left", name: "Popup time",
-                 detail: Device.popupNames[safe: dev.popi] ?? "") { page = .popup }
-            Tile(icon: "eyes.inverse", name: "Eye style",
-                 detail: Device.eyeNames[safe: dev.eye] ?? "") { page = .eyes }
+            if !pared {
+                Tile(icon: "bubble.left", name: "Popup time",
+                     detail: Device.popupNames[safe: dev.popi] ?? "") { page = .popup }
+                Tile(icon: "eyes.inverse", name: "Eye style",
+                     detail: Device.eyeNames[safe: dev.eye] ?? "") { page = .eyes }
+            }
             // What used to be behind More. There was a grid's worth of
             // empty space under three rows and four things hidden
             // behind one tile, which is two problems that cancel.
             Tile(icon: "battery.100", name: "Battery",
                  detail: dev.battPct < 0 ? "no pack" : "\(dev.battPct)%") { page = .battery }
-            Tile(icon: "powersleep", name: "Power down",
-                 detail: dev.deepOff ? "off" : (Device.deepNames[safe: dev.deepi] ?? "")) { page = .power }
+            if !pared {
+                Tile(icon: "powersleep", name: "Power down",
+                     detail: dev.deepOff ? "off" : (Device.deepNames[safe: dev.deepi] ?? "")) { page = .power }
+            }
             Tile(icon: "bell.badge", name: "Notifications",
                  detail: RobotLink.shared.muted.isEmpty ? "every app" : "\(RobotLink.shared.muted.count) off") {
                 RobotLink.shared.readList(); page = .filters
@@ -117,14 +126,16 @@ struct RobotSettings: View {
                  detail: dev.version.isEmpty ? "from a file" : dev.version) { page = .firmware }
             // Moved off the main grid to make room for Notifications.
             // Syncing is occasional; the filter is not.
-            Tile(icon: "arrow.triangle.2.circlepath", name: "Sync",
-                 detail: "WiFi minute") { dev.syncRobot() }
-            Tile(icon: "arrow.counterclockwise", name: "Reset",
-                 detail: "settings only") { page = .reset }
-            Tile(icon: "antenna.radiowaves.left.and.right", name: "Network",
-                 detail: "Bluetooth") { page = .network }
-            Tile(icon: "bicycle", name: "Vehicle",
-                 detail: dev.bike ? (Device.bikeTemplates[safe: dev.btpl] ?? "on") : "off") { page = .vehicle }
+            if !pared {
+                Tile(icon: "arrow.triangle.2.circlepath", name: "Sync",
+                     detail: "WiFi minute") { dev.syncRobot() }
+                Tile(icon: "arrow.counterclockwise", name: "Reset",
+                     detail: "settings only") { page = .reset }
+                Tile(icon: "antenna.radiowaves.left.and.right", name: "Network",
+                     detail: "Bluetooth") { page = .network }
+                Tile(icon: "bicycle", name: "Vehicle",
+                     detail: dev.bike ? (Device.bikeTemplates[safe: dev.btpl] ?? "on") : "off") { page = .vehicle }
+            }
         }
     }
 

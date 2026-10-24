@@ -71,6 +71,21 @@ final class RobotLink: NSObject, ObservableObject {
         Set((stat["caps"] ?? "").split(separator: ",").map(String.init))
     }
     func can(_ c: String) -> Bool { caps.isEmpty || caps.contains(c) }
+
+    /// Mac mode: the Zuno has stepped back from being a watch and is
+    /// this Mac's second screen. Nothing about it is remembered on the
+    /// device, so unplugging always gives you a Zuno on its own back.
+    var macMode: Bool { stat["mac"] == "1" }
+    var camOn: Bool   { stat["cam"] == "1" }
+    var micOn: Bool   { stat["mic"] == "1" }
+    var micMuted: Bool { stat["muted"] == "1" }
+    func setMacMode(_ on: Bool) {
+        _ = send("!mac \(on ? 1 : 0)")
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            self?.readStat()
+        }
+    }
     /// Why a tile is not available on whatever is connected, or nil when
     /// it is. Named after the robot, because "not on Zuno" tells you
     /// what to do about it and "unavailable" does not.
@@ -238,6 +253,12 @@ final class RobotLink: NSObject, ObservableObject {
             self?.readStat()
         }
         return true
+    }
+
+    /// Put this Mac's clock on the robot again, now.
+    func pushTime() {
+        guard connected, let p = peripheral, let t = timeChr else { return }
+        p.writeValue(Self.clock(), for: t, type: .withResponse)
     }
 
     func readStat() {
