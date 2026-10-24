@@ -274,6 +274,12 @@ struct Panel: View {
             // the gear, because changing them with Rafiq away is fine:
             // they are kept and sent when it comes back.
             Offline { showRobot = true; closeOthers(except: .robot) }
+        } else if link.isZuno && !link.macMode {
+            // A Zuno is its own watch until this Mac asks for it. A
+            // panel of switches here would be a panel for a device that
+            // is not listening to this Mac yet, so there is one thing
+            // to do and it is the only thing shown.
+            ZunoConnect { link.setMacMode(true) }
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 grid
@@ -493,15 +499,6 @@ struct Panel: View {
                   spacing: 6) {
 
             // row one: the robot, now
-            if link.isZuno {
-                // The way in. A Zuno works on its own until this is
-                // tapped, and goes back to working on its own when it
-                // is tapped again or the link drops.
-                Tile(icon: "bolt.horizontal.circle", name: "Connect",
-                     detail: "Mac mode", enabled: link.connected) {
-                    link.setMacMode(true)
-                }
-            }
             Tile(icon: "text.quote", name: "Phrases", detail: "saved lines") {
                 showPhrases = true
             }
@@ -742,6 +739,41 @@ struct AwaySheet: View {
 
 
 /// What the panel shows with nothing linked.
+/// A Zuno, linked over Bluetooth but not yet working for this Mac.
+/// One button, because there is one thing to do.
+struct ZunoConnect: View {
+    @ObservedObject private var link = RobotLink.shared
+    var connect: () -> Void
+
+    var body: some View {
+        VStack(spacing: 11) {
+            Image(systemName: "bolt.horizontal.circle")
+                .font(.system(size: 54, weight: .thin))
+                .foregroundStyle(.tint)
+                .accessibilityHidden(true)
+            Text("\(link.shortName) is here").font(.system(size: 15, weight: .semibold))
+            Text("It is working as a watch on its own. Connect it and it becomes "
+                 + "this Mac's second screen until you let it go.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 18)
+            Button("Connect to \(link.shortName)") { connect() }
+                .font(.system(size: 12, weight: .medium))
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 2)
+            Text("Meeting mute, the clicker, the knob, screenshots, your tasks "
+                 + "and the rest appear once it is connected.")
+                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 18)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+    }
+}
+
 struct Offline: View {
     @ObservedObject private var link = RobotLink.shared
     @ObservedObject private var fx = Features.shared
