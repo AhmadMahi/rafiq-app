@@ -108,8 +108,19 @@ final class Updater: ObservableObject {
                   ["attach", "-quiet", "-nobrowse", "-readonly", "-mountpoint", mnt.path, dmg.path]) else {
             phase = .failed("Could not open the image"); return
         }
-        let newApp = mnt.appendingPathComponent("Rafiq.app")
-        let staged = work.appendingPathComponent("Rafiq.app")
+        // Whatever the app is called. This used to be "Rafiq.app"
+        // spelled out, which would have made renaming the app a thing
+        // that broke every copy already installed: the old one would
+        // mount the new image, look for a name that was no longer in
+        // it, and give up with the user stranded on the old version.
+        let inside = (try? FileManager.default.contentsOfDirectory(atPath: mnt.path))?
+            .first { $0.hasSuffix(".app") }
+        guard let inside else {
+            _ = run("/usr/bin/hdiutil", ["detach", "-quiet", mnt.path])
+            phase = .failed("The image had no app in it"); return
+        }
+        let newApp = mnt.appendingPathComponent(inside)
+        let staged = work.appendingPathComponent(inside)
         let copied = run("/usr/bin/ditto", [newApp.path, staged.path])
         _ = run("/usr/bin/hdiutil", ["detach", "-quiet", mnt.path])
         guard copied, FileManager.default.fileExists(atPath: staged.path) else {

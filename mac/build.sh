@@ -3,7 +3,7 @@
 set -euo pipefail
 NAME="Rafiq"
 APP="build/$NAME.app"
-VER="4.12.0"
+VER="4.13.0"
 
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
@@ -24,7 +24,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleName</key><string>$NAME</string>
-  <key>CFBundleDisplayName</key><string>$NAME</string>
+  <key>CFBundleDisplayName</key><string>Companion</string>
   <key>CFBundleExecutable</key><string>$NAME</string>
   <key>CFBundleIdentifier</key><string>in.iotcart.rafiq</string>
   <key>CFBundleIconFile</key><string>$NAME</string>

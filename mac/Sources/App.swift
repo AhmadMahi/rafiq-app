@@ -81,12 +81,15 @@ struct Panel: View {
     @State private var showRobot = false
     @State private var showNotes = false
     @State private var showGestures = false
+    @State private var showSched = false
     @ObservedObject private var fx = Features.shared
+    @ObservedObject private var reg = Devices.shared
+    @ObservedObject private var plan = Plan.shared
     @FocusState private var typing: Bool
     @Environment(\.colorScheme) private var systemScheme
 
     enum Page: String { case grid, settings, robot, pair, focus, breakNow, remind,
-                        phrases, gestures, away }
+                        phrases, gestures, away, sched }
 
     /// The panel is this size on every page, always.
     ///
@@ -112,6 +115,7 @@ struct Panel: View {
     private func closeOthers(except keep: Page) {
         if keep != .settings { showSettings = false }
         if keep != .robot    { showRobot = false; showNotes = false }
+        if keep != .sched    { showSched = false }
         if keep != .focus    { showFocus = false }
         if keep != .breakNow { showBreak = false }
         if keep != .remind   { showRemind = false }
@@ -159,6 +163,7 @@ struct Panel: View {
             closeOthers(except: page)
             switch page {
             case .settings: showSettings = true
+            case .sched:    showSched = true
             case .robot:    showRobot = true
             case .focus:    showFocus = true
             case .breakNow: showBreak = true
@@ -240,6 +245,12 @@ struct Panel: View {
             scrolling { RobotSettings(showing: $showNotes, start: .filters) }
         } else if showRobot {
             scrolling { RobotSettings(showing: $showRobot) }
+        } else if showSched {
+            scrolling { SchedulePane(showing: $showSched) }
+        } else if reg.isEmpty {
+            // Nothing has been added, so there is nothing a panel of
+            // switches could be about.
+            AddDevice { }
         } else if dev.pairing {
             PairView()
         } else if showFocus {
@@ -293,7 +304,7 @@ struct Panel: View {
             Circle()
                 .fill(dot)
                 .frame(width: 7, height: 7)
-            Text("RAFIQ")
+            Text("COMPANION")
                 .font(.system(size: 11, weight: .semibold))
                 .tracking(1.4)
             if link.timerLeft > 0 {
@@ -480,6 +491,11 @@ struct Panel: View {
             }
             Tile(icon: "dot.radiowaves.left.and.right", name: "Find", detail: "call out") {
                 dev.findRobot()
+            }
+            Tile(icon: "calendar.day.timeline.left", name: "Today",
+                 detail: plan.blocks.isEmpty ? "no plan" : "\(plan.blocks.count) blocks",
+                 on: !plan.blocks.isEmpty) {
+                showSched = true; closeOthers(except: .sched)
             }
             Tile(icon: "arrow.triangle.2.circlepath", name: "Sync",
                  detail: "time and weather") {
