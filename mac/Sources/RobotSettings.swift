@@ -773,6 +773,19 @@ struct MapRow: View {
             ActionPicker(title: "Hold the pad", action: Binding(get: { map.hold ?? .nothing }, set: { map.hold = $0 }))
             ActionPicker(title: "Lean left", action: Binding(get: { map.leanLeft ?? .nothing }, set: { map.leanLeft = $0 }))
             ActionPicker(title: "Lean right", action: Binding(get: { map.leanRight ?? .nothing }, set: { map.leanRight = $0 }))
+            if RobotLink.shared.can("orient") {
+                Divider().padding(.vertical, 1)
+                Text("Which way up it is")
+                    .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                ActionPicker(title: "Tilt left", action: Binding(get: { map.tiltLeft ?? .nothing }, set: { map.tiltLeft = $0 }))
+                ActionPicker(title: "Tilt right", action: Binding(get: { map.tiltRight ?? .nothing }, set: { map.tiltRight = $0 }))
+                ActionPicker(title: "Stood upright", action: Binding(get: { map.standing ?? .nothing }, set: { map.standing = $0 }))
+                ActionPicker(title: "Face up", action: Binding(get: { map.faceUp ?? .nothing }, set: { map.faceUp = $0 }))
+                ActionPicker(title: "Face down", action: Binding(get: { map.faceDown ?? .nothing }, set: { map.faceDown = $0 }))
+                ActionPicker(title: "Upside down", action: Binding(get: { map.upside ?? .nothing }, set: { map.upside = $0 }))
+                Text("Face down mutes you in a call before anything here runs.")
+                    .font(.system(size: 10)).foregroundStyle(.tertiary)
+            }
         }
         .padding(7)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous)

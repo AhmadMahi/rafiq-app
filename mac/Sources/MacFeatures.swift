@@ -179,8 +179,8 @@ final class Features: NSObject, ObservableObject {
         // it speak again. Only while in a call, and only when the state
         // actually needs changing, so putting it down on a desk between
         // calls does nothing.
-        if ev == "fd", inCall, !mutedByUs { toggleMute(); return true }
-        if ev == "fu", inCall, mutedByUs  { toggleMute(); return true }
+        if ev == "od", inCall, !mutedByUs { toggleMute(); return true }
+        if ev == "ou", inCall, mutedByUs  { toggleMute(); return true }
         return false
     }
 

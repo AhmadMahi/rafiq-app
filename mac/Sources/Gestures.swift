@@ -54,6 +54,14 @@ struct GMap: Codable, Equatable, Identifiable {
     var hold: GAction? = nil
     var leanLeft: GAction? = nil
     var leanRight: GAction? = nil
+    // 4.14: which way up it is. Optional like the rest, so maps saved
+    // before they existed still load.
+    var tiltLeft: GAction? = nil
+    var tiltRight: GAction? = nil
+    var faceUp: GAction? = nil
+    var faceDown: GAction? = nil
+    var standing: GAction? = nil
+    var upside: GAction? = nil
     var name: String {
         guard let b = bundleId else { return "Everything else" }
         return GAction.appName(b) ?? b
@@ -209,6 +217,16 @@ final class Gestures: ObservableObject {
         case "th":            run(m.hold ?? .nothing)
         case "ll":            run(m.leanLeft ?? .nothing)
         case "lr":            run(m.leanRight ?? .nothing)
+        // which way up a Zuno is. Face down reaches here only when it
+        // was not already used to mute a call, which Features does
+        // first, so the obvious thing still happens in a meeting and
+        // the rest of the time it is yours.
+        case "ol":            run(m.tiltLeft ?? .nothing)
+        case "or":            run(m.tiltRight ?? .nothing)
+        case "ou":            run(m.faceUp ?? .nothing)
+        case "od":            run(m.faceDown ?? .nothing)
+        case "os":            run(m.standing ?? .nothing)
+        case "ov":            run(m.upside ?? .nothing)
         default:              break             // "t2" (the long hold) and "k3" are not yours
         }
     }
