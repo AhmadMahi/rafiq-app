@@ -22,11 +22,12 @@ final class Features: NSObject, ObservableObject {
 
     // ------------------------------------------------------------ switches
     nonisolated private static func flag(_ k: String, _ d: Bool) -> Bool { UserDefaults.standard.object(forKey: k) as? Bool ?? d }
-    @Published var meetMute   = flag("fMeet", true)   { didSet { save("fMeet", meetMute) } }
-    @Published var clicker    = flag("fClick", false) { didSet { save("fClick", clicker) } }
-    @Published var knob       = flag("fKnob", false)  { didSet { save("fKnob", knob); push() } }
+    @Published var meetMute   = flag("fMeet", true)   { didSet { save("fMeet", meetMute); screen("meet", meetMute) } }
+    @Published var clicker    = flag("fClick", false) { didSet { save("fClick", clicker); screen("click", clicker) } }
+    @Published var knob       = flag("fKnob", false)  { didSet { save("fKnob", knob); push(); screen("vol", knob) } }
     @Published var shot       = flag("fShot", true)   { didSet { save("fShot", shot) } }
-    @Published var health     = flag("fHealth", true) { didSet { save("fHealth", health); lastHealth = ""; tickHealth() } }
+    @Published var work       = flag("fWork", false)  { didSet { save("fWork", work); screen("work", work) } }
+    @Published var health     = flag("fHealth", true) { didSet { save("fHealth", health); lastHealth = ""; tickHealth(); screen("health", health) } }
     @Published var dimTyping  = flag("fDim", false)   { didSet { save("fDim", dimTyping); if !dimTyping { setDim(false) } } }
     @Published var prayPause  = flag("fPray", true)   { didSet { save("fPray", prayPause) } }
     @Published var walkAway   = flag("fWalk", false)  { didSet { save("fWalk", walkAway); push() } }
@@ -121,6 +122,36 @@ final class Features: NSObject, ObservableObject {
         link.send("!walk \(walkAway ? 1 : 0)")
     }
 
+    /// Switch one of the watch's Mac screens on or off. Switching one on
+    /// also takes the watch to it, which is the whole point: you pressed
+    /// the thing with that name on it, so that is what you want to see.
+    /// Only in Mac mode -- a watch being its own watch has its own
+    /// carousel and none of this belongs in it.
+    func screen(_ name: String, _ on: Bool) {
+        guard link.full, link.macMode else { return }
+        link.send("!scr \(name) \(on ? 1 : 0)")
+        if on, name == "vol" { sendVolume() }
+    }
+
+    /// Everything off but the link itself. Connecting a Mac should not
+    /// silently switch on nine things that were left on weeks ago, each
+    /// of which takes over a pad or a screen.
+    func clearForMac() {
+        meetMute = false; clicker = false; knob = false; work = false
+        health = false; reminders = false; dimTyping = false; shot = false
+        for n in ["click", "meet", "vol", "work", "health"] { link.send("!scr \(n) 0") }
+    }
+
+    func sendVolume() {
+        guard let v = OutVol.get() else { return }
+        link.send("!vol \(Int((v * 100).rounded()))")
+    }
+    private func stepVolume(_ dir: Int) {
+        guard let v = OutVol.get() else { return }
+        OutVol.set(min(1, max(0, v + Float(dir) * 0.06)))
+        sendVolume()
+    }
+
     private var awake = true
     private func goingToSleep() {
         awake = false
@@ -164,6 +195,17 @@ final class Features: NSObject, ObservableObject {
         if ev == "want read" { Reads.shared.askedFor(); return true }
         if ev == "want sky"  { skyDay = ""; wxAt = .distantPast; skyTryAt = .distantPast
                                tickSky(); return true }
+        // Said from one of the watch's own Mac screens, where the pads
+        // mean one thing and the watch has already decided which. No
+        // guessing at this end about what was on screen at the time.
+        switch ev {
+        case "nx": _ = Keys.press("right"); return true
+        case "pv": _ = Keys.press("left");  return true
+        case "v+": stepVolume(+1); return true
+        case "v-": stepVolume(-1); return true
+        case "mt": toggleMute(); return true
+        default: break
+        }
         // a meeting: the pad, and only the pad, mutes and unmutes
         if meetMute && inCall && ev == "t1" { toggleMute(); return true }
         // presenting: knock next, lean back (lean forward next too)
@@ -190,6 +232,7 @@ final class Features: NSObject, ObservableObject {
         mutedByUs.toggle()
         Audio.setInputMuted(mutedByUs)
         link.send("!busy 0 1 \(mutedByUs ? 1 : 0)")   // the robot shows muted or live
+        link.send("!meet \(mutedByUs ? 1 : 0)")       // and the meeting screen says so too
     }
 
     // ---- the knob: degrees from where the hold began ----

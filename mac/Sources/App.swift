@@ -392,6 +392,18 @@ struct Panel: View {
         if link.isZuno && link.macMode { zunoGrid } else { rafiqGrid }
     }
 
+    /// What a Zuno driving this Mac can actually do, and nothing else.
+    ///
+    /// Every switch here owns one screen on the watch, and switching it
+    /// on takes the watch to that screen. That is the whole rule, and
+    /// it is why the panel is this short: a tile for something the
+    /// watch has no screen and no pad for is a tile that promises
+    /// something it cannot show you.
+    ///
+    /// Everything starts off. `setMacMode` clears them, because which
+    /// ones a session needs is not the same from one session to the
+    /// next, and the only thing on when a Mac connects should be the
+    /// connection.
     private var zunoGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4),
                   spacing: 6) {
@@ -400,108 +412,66 @@ struct Panel: View {
                  detail: "tap to release", on: true) {
                 link.setMacMode(false)
             }
-            // what the pad and the knocks do
-            Tile(icon: "mic.slash", name: "Meeting mute",
-                 detail: fx.meetMute ? "tap the pad" : "off", on: fx.meetMute) {
+
+            // --- the four that take over the watch's screen ---
+            Tile(icon: "mic.slash", name: "Meeting",
+                 detail: fx.meetMute ? "on the watch" : "off", on: fx.meetMute) {
                 fx.meetMute.toggle()
             }
             Tile(icon: "chevron.right.2", name: "Clicker",
-                 detail: fx.clicker ? "knock ahead" : "off", on: fx.clicker) {
+                 detail: fx.clicker ? "tap to move" : "off", on: fx.clicker) {
                 fx.clicker.toggle()
             }
-            Tile(icon: "dial.medium", name: "Volume knob",
-                 detail: fx.knob ? "hold and tilt" : "off", on: fx.knob) {
+            Tile(icon: "dial.medium", name: "Volume",
+                 detail: fx.knob ? "tap to change" : "off", on: fx.knob) {
                 fx.knob.toggle()
             }
+            Tile(icon: "timer", name: "Work timer",
+                 detail: link.timerLeft > 0
+                       ? String(format: "%d:%02d", link.timerLeft / 60, link.timerLeft % 60)
+                       : (fx.work ? "on the watch" : "off"),
+                 on: fx.work || link.timerLeft > 0) {
+                fx.work.toggle()
+                if fx.work { showFocus = true; closeOthers(except: .focus) }
+                else if link.timerLeft > 0 { dev.stopTimer() }
+            }
+            Tile(icon: "heart.text.square", name: "Mac health",
+                 detail: fx.health ? "on the watch" : "off", on: fx.health) {
+                fx.health.toggle()
+            }
+
+            // --- the rest: no screen of their own, but the watch does them ---
             Tile(icon: "camera.viewfinder", name: "Screenshot",
                  detail: fx.shot ? "three knocks" : "off", on: fx.shot) {
                 fx.shot.toggle()
-            }
-            // what the screen shows
-            Tile(icon: "heart.text.square", name: "Mac health",
-                 detail: fx.health ? "on its screen" : "off", on: fx.health) {
-                fx.health.toggle()
             }
             Tile(icon: "checklist", name: "Tasks",
                  detail: fx.reminders ? "top three" : "off", on: fx.reminders) {
                 fx.reminders.toggle()
             }
-            Tile(icon: "bell.badge", name: "Notifications",
-                 detail: link.quiet ? "held back" : "from your phone", on: !link.quiet) {
-                _ = link.send("!cfg quiet \(link.quiet ? 0 : 1)")
-            }
-            // what it does while you work
-            Tile(icon: "sun.min", name: "Dim typing",
-                 detail: fx.dimTyping ? "while you type" : "off", on: fx.dimTyping) {
-                fx.dimTyping.toggle()
-            }
-            Tile(icon: "lock.laptopcomputer", name: "Walk away",
-                 detail: fx.walkAway ? "locks this Mac" : "off", on: fx.walkAway) {
-                fx.walkAway.toggle()
-            }
-            Tile(icon: "video", name: "Cam & mic",
-                 detail: link.camOn || link.micOn
-                       ? (link.micMuted ? "muted" : "live now")
-                       : (dev.watchAV ? "watching" : "off"),
-                 on: dev.watchAV) {
-                dev.watchAV.toggle(); svc.syncAV()
-            }
-            Tile(icon: "eyes", name: "Follow",
-                 detail: dev.blocked(.follow) ?? "the pointer",
-                 on: dev.following, enabled: dev.blocked(.follow) == nil) {
-                Task { await dev.setFollow(!dev.following); svc.syncCursor() }
-            }
-            // the rest of the day
             Tile(icon: "hand.tap", name: "Gestures",
-                 detail: ges.on ? (ges.micLive ? (ges.muted ? "muted" : "on a call") : "on") : "off",
-                 on: ges.on) {
+                 detail: ges.on ? "on" : "off", on: ges.on) {
                 ges.on.toggle()
                 if ges.on { showGestures = true; closeOthers(except: .gestures) }
-            }
-            Tile(icon: link.timerLeft > 0 ? "stop.circle" : "timer", name: "Timer",
-                 detail: link.timerLeft > 0
-                       ? String(format: "%d:%02d  stop", link.timerLeft / 60, link.timerLeft % 60)
-                       : "minutes",
-                 on: link.timerLeft > 0) {
-                if link.timerLeft > 0 { dev.stopTimer() } else { showFocus = true; closeOthers(except: .focus) }
-            }
-            Tile(icon: "figure.walk", name: "Breaks",
-                 detail: dev.breakOn ? "every \(dev.breakMins)m" : "off", on: dev.breakOn) {
-                dev.breakOn.toggle(); svc.syncBreaks()
-            }
-            Tile(icon: "cup.and.saucer", name: "On a break",
-                 detail: dev.dndLeft > 0 ? "\(dev.dndLeft / 60 + 1) min left"
-                                         : (dev.blocked(.breakNow) ?? "locks Mac"),
-                 on: dev.dndLeft > 0, enabled: dev.blocked(.breakNow) == nil) {
-                if dev.dndLeft > 0 { Task { await dev.endBreak() } } else { showBreak = true }
-            }
-            Tile(icon: "wind", name: "Relax",
-                 detail: dev.blocked(.relax) ?? "3 min",
-                 on: dev.relaxing, enabled: dev.blocked(.relax) == nil) {
-                Task { await dev.setRelax(!dev.relaxing) }
-            }
-            Tile(icon: "bell", name: "Remind me",
-                 detail: Reminders.shared.pending.isEmpty
-                       ? "nothing set" : "\(Reminders.shared.pending.count) waiting",
-                 on: !Reminders.shared.pending.isEmpty) {
-                showRemind = true
-            }
-            Tile(icon: "text.quote", name: "Phrases", detail: "saved lines") {
-                showPhrases = true
-            }
-            Tile(icon: "dot.radiowaves.left.and.right", name: "Find", detail: "call out") {
-                dev.findRobot()
             }
             Tile(icon: "calendar.day.timeline.left", name: "Today",
                  detail: plan.blocks.isEmpty ? "no plan" : "\(plan.blocks.count) blocks",
                  on: !plan.blocks.isEmpty) {
                 showSched = true; closeOthers(except: .sched)
             }
-            Tile(icon: "arrow.triangle.2.circlepath", name: "Sync",
-                 detail: "time and weather") {
-                fx.syncNow()
+            Tile(icon: "bell.badge", name: "Notifications",
+                 detail: link.quiet ? "held back" : "from your phone", on: !link.quiet) {
+                _ = link.send("!cfg quiet \(link.quiet ? 0 : 1)")
             }
-            Tile(icon: "slider.horizontal.3", name: "Settings", detail: "brightness") {
+            Tile(icon: "sun.min", name: "Dim typing",
+                 detail: fx.dimTyping ? "while you type" : "off", on: fx.dimTyping) {
+                fx.dimTyping.toggle()
+            }
+            // Everything the watch can do that is not on this panel --
+            // Follow, cam and mic, walk away, breaks, Find -- is behind
+            // here, where it is still one tap away without being
+            // sixteen switches in front of you mid-session.
+            Tile(icon: "slider.horizontal.3", name: "Settings", detail: "and the rest") {
                 showRobot = true; closeOthers(except: .robot)
             }
         }

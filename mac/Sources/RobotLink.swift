@@ -81,6 +81,11 @@ final class RobotLink: NSObject, ObservableObject {
     var micMuted: Bool { stat["muted"] == "1" }
     func setMacMode(_ on: Bool) {
         _ = send("!mac \(on ? 1 : 0)")
+        // A clean slate every time. Which of these a session needs is
+        // not the same from one session to the next, and finding nine
+        // of them already on -- each one holding a pad or a screen on
+        // the watch -- is not a starting point anyone asked for.
+        if on { Features.shared.clearForMac() }
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)
             self?.readStat()
