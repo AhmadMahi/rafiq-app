@@ -106,6 +106,17 @@ final class Device: ObservableObject {
     /// Must match FACE_NAME in the firmware, in order: the robot is
     /// told a number, so a list that disagrees picks the wrong face
     /// and mislabels the one that is on.
+    /// A Zuno's faces, which are not a Rafiq's. Must match FACE_NAMES in
+    /// its firmware, in order. Showing the wrong list here meant the
+    /// watch face setting named faces the watch does not have, and
+    /// picking one set a different face from the one you read.
+    static let zunoFaceNames = ["classic", "analog", "mini analog", "neon",
+                                "terminal", "water", "sand"]
+    /// Whichever is connected. A Rafiq says nothing about its kind, so
+    /// the Rafiq list stays the default.
+    static var faces: [String] {
+        RobotLink.shared.isZuno ? zunoFaceNames : faceNames
+    }
     static let faceNames   = ["classic", "stacked", "date up", "minimal", "side",
                               "banner", "drift", "parallax", "water", "sand",
                               "dial", "bauhaus", "regulator", "rings", "infograph",

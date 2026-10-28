@@ -103,28 +103,36 @@ struct SchedulePane: View {
                     .padding(.vertical, 4)
             }
 
+            // Two lines, not one. On one line this wanted 394 px inside a
+            // 330 px panel, so the remove button -- and with it the whole
+            // right-hand edge of the sheet, the close button included --
+            // sat outside the window with no way to reach any of it.
             ForEach($plan.blocks) { $b in
-                HStack(spacing: 6) {
-                    Picker("", selection: $b.kind) {
-                        ForEach(0..<4, id: \.self) { k in Text(Plan.kindNames[k]).tag(k) }
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Picker("", selection: $b.kind) {
+                            ForEach(0..<4, id: \.self) { k in Text(Plan.kindNames[k]).tag(k) }
+                        }
+                        .labelsHidden().frame(width: 76)
+
+                        TextField(Plan.kindNames[b.kind], text: $b.name)
+                            .textFieldStyle(.roundedBorder)
+
+                        Button {
+                            plan.remove(b.id)
+                        } label: { Image(systemName: "minus.circle") }
+                            .buttonStyle(.plain).foregroundStyle(.secondary)
+                            .help("Remove this block")
                     }
-                    .labelsHidden().frame(width: 84)
-
-                    TextField(Plan.kindNames[b.kind], text: $b.name)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: 96)
-
-                    Stepper(Plan.hhmm(b.start), value: $b.start, in: 0...(23 * 60 + 55), step: 5)
-                        .font(.system(size: 11)).frame(width: 96)
-
-                    Stepper("\(b.mins)m", value: $b.mins, in: 5...300, step: 5)
-                        .font(.system(size: 11)).frame(width: 78)
-
-                    Button {
-                        plan.remove(b.id)
-                    } label: { Image(systemName: "minus.circle") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Stepper(Plan.hhmm(b.start), value: $b.start, in: 0...(23 * 60 + 55), step: 5)
+                            .font(.system(size: 11)).frame(width: 96)
+                        Stepper("\(b.mins)m", value: $b.mins, in: 5...300, step: 5)
+                            .font(.system(size: 11)).frame(width: 78)
+                        Spacer(minLength: 0)
+                    }
                 }
+                .padding(.bottom, 3)
             }
 
             HStack(spacing: 8) {

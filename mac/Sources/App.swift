@@ -467,10 +467,6 @@ struct Panel: View {
                  detail: link.quiet ? "held back" : "from your phone", on: !link.quiet) {
                 _ = link.send("!cfg quiet \(link.quiet ? 0 : 1)")
             }
-            Tile(icon: "sun.min", name: "Dim typing",
-                 detail: fx.dimTyping ? "while you type" : "off", on: fx.dimTyping) {
-                fx.dimTyping.toggle()
-            }
             // Everything the watch can do that is not on this panel --
             // Follow, cam and mic, walk away, breaks, Find -- is behind
             // here, where it is still one tap away without being
@@ -822,7 +818,7 @@ struct Offline: View {
                         .padding(.horizontal, 18)
                 }
             }
-            Button("Robot settings") { openRobot() }
+            Button("\(link.shortName.capitalizedFirst) settings") { openRobot() }
                 .font(.system(size: 11))
                 .padding(.top, 2)
             Text("Anything you change there is kept and sent when it returns.")

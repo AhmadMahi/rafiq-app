@@ -36,7 +36,7 @@ struct RobotSettings: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
-                    Text(page == nil ? "Robot settings" : title(page!))
+                    Text(page == nil ? "\(RobotLink.shared.shortName.capitalizedFirst) settings" : title(page!))
                         .font(.system(size: 12, weight: .semibold))
                     Spacer()
                     if dev.version.isEmpty == false {
@@ -91,7 +91,7 @@ struct RobotSettings: View {
             Tile(icon: "sun.max", name: "Brightness",
                  detail: Device.brightNames[safe: dev.bri == 0 ? 0 : brightIndex] ?? "") { page = .brightness }
             Tile(icon: "clock", name: "Watch face",
-                 detail: Device.faceNames[safe: dev.face] ?? "") { page = .face }
+                 detail: Device.faces[safe: dev.face] ?? "") { page = .face }
             if !pared {
                 Tile(icon: "moon", name: "Sleep after",
                      detail: Device.sleepNames[safe: dev.slpi] ?? "") { page = .sleep }
@@ -165,7 +165,7 @@ struct RobotSettings: View {
                 Task { await dev.setBrightness(Device.brightVals[i]); await dev.refresh() }
             }
         case .face:
-            Choice(names: Device.faceNames, current: dev.face) { i in
+            Choice(names: Device.faces, current: dev.face) { i in
                 Task { await dev.setFace(i); await dev.refresh() }
             }
         case .sleep:
