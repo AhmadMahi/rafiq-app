@@ -796,14 +796,20 @@ struct Offline: View {
     var openRobot: () -> Void
 
     private var title: String {
-        if link.away { return "Rafiq is away" }
-        return "Rafiq is offline"
+        if link.away { return "\(link.shortName.capitalizedFirst) is away" }
+        // Being connected to this Mac and not answering the panel is a
+        // different thing from being switched off, and telling someone
+        // to touch a watch that is already on and linked is no help at
+        // all. When the link knows better, say what it knows.
+        if !link.hint.isEmpty { return "\(link.shortName.capitalizedFirst) is not answering" }
+        return "\(link.shortName.capitalizedFirst) is offline"
     }
     private var note: String {
         if link.away {
             return "It is looking after itself and checking for you now and then. "
                  + "It comes back on its own when a device it knows is near."
         }
+        if !link.hint.isEmpty { return link.hint }
         return "It switches itself off when it is alone. Touch it to wake it, "
              + "or turn it on, and it will connect by itself."
     }
@@ -828,10 +834,24 @@ struct Offline: View {
                 Text("\(link.queue.count) waiting to go across when it is back")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
+            if !link.hint.isEmpty {
+                Button("Try again") { link.retry() }
+                    .font(.system(size: 12, weight: .medium))
+                    .buttonStyle(.borderedProminent)
+                    .padding(.top, 2)
+                if !link.sawServices.isEmpty {
+                    Text("This Mac can see \(link.sawServices.count) of its services, "
+                         + "but not the panel's.")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 18)
+                }
+            }
             Button("Robot settings") { openRobot() }
                 .font(.system(size: 11))
                 .padding(.top, 2)
-            Text("Anything you change there is kept and sent when Rafiq returns.")
+            Text("Anything you change there is kept and sent when it returns.")
                 .font(.system(size: 10)).foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)

@@ -89,8 +89,20 @@ struct SettingsPane: View {
                 // Bluetooth is how it is reached. WiFi is a choice, and off.
                 Group2(title: "Connection") {
                     Row(title: "Bluetooth", note: link.name.isEmpty ? "" : link.name) {
+                        // Bounded and wrapping. A Row sizes its value to
+                        // fit, so an unbounded line here drags the whole
+                        // panel out to the width of the longest thing
+                        // the link has ever had to say.
                         Text(link.state).font(.system(size: 11))
                             .foregroundStyle(link.connected ? Color.green : Color.secondary)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 150, alignment: .trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if !link.hint.isEmpty {
+                        Row(title: "What to do", note: link.hint) {
+                            Button("Try again") { link.retry() }.font(.system(size: 11))
+                        }
                     }
                     if !link.firmware.isEmpty {
                         Row(title: "Firmware",
@@ -101,8 +113,8 @@ struct SettingsPane: View {
                     if link.staleHint {
                         // The robot is new enough but macOS still lists its old services.
                         Row(title: "Old Bluetooth list",
-                            note: "System Settings, Bluetooth, Rafiq: Forget This Device. Then come "
-                                + "back here and pair again; everything works after that.") {
+                            note: "System Settings, Bluetooth, \(link.shortName): Forget This Device. "
+                                + "Then come back here and pair again; everything works after that.") {
                             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                         }
                     }

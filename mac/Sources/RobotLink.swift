@@ -181,6 +181,22 @@ final class RobotLink: NSObject, ObservableObject {
     /// The robot says 7.4 or newer but this Mac still sees the old
     /// services: macOS is holding an old list. Settings shows what to do.
     @Published private(set) var staleHint = false
+    /// The long version of why there is no link, when there is one
+    /// worth giving. `state` stays short because it sits in the value
+    /// column of a settings row, which is sized to its content -- a
+    /// sentence there pushes the whole panel wide. This goes in a row
+    /// of its own, and on the Offline screen.
+    @Published private(set) var hint = ""
+    /// What the Mac actually reported having, when it did not have
+    /// ours. Worth saying out loud: it is the difference between a
+    /// device that is not answering and one that is not there.
+    @Published private(set) var sawServices: [String] = []
+    /// How many ways of asking for the services have been tried on this
+    /// link. See `didDiscoverServices`.
+    private var discoverTry = 0
+    /// Connects that timed out in a row on the same device, so one that
+    /// is never coming back stops being the only one we ever ask for.
+    private var misses = 0
     private var poll: Timer?
     /// Runs while there is no link, so looking is something that keeps
     /// happening rather than something tried once at launch.
@@ -457,6 +473,17 @@ final class RobotLink: NSObject, ObservableObject {
         }
     }
 
+    /// Try the whole thing again from a standing start: drop the link,
+    /// forget what this Mac thinks it knows about the device, look
+    /// afresh. What the Offline screen's button does.
+    func retry() {
+        hint = ""
+        sawServices = []
+        discoverTry = 0
+        misses = 0
+        forget()
+    }
+
     /// Start over: what is on the list may be gone, and what is missing
     /// may have turned up since. The Add Device pane offers this,
     /// because a pane that can only wait is no use when the waiting is
@@ -496,6 +523,15 @@ final class RobotLink: NSObject, ObservableObject {
             central.cancelPeripheralConnection(p)
             peripheral = nil
             pendingSince = nil
+            misses += 1
+            // Twice in a row is enough. Something else may be in the
+            // room -- a watch that is on while the robot this Mac
+            // remembers is in a drawer -- and holding the search open
+            // for the one that never answers helps nobody.
+            if misses >= 2, found.contains(where: { $0.id != p.identifier && wanted($0.name) }) {
+                savedId = nil
+                misses = 0
+            }
         }
         find()
     }
@@ -517,6 +553,8 @@ final class RobotLink: NSObject, ObservableObject {
     private func ready() {
         guard let p = peripheral else { return }
         connected = true
+        hint = ""
+        misses = 0
         stopScanning()
         sweep?.invalidate(); sweep = nil
         pendingSince = nil
@@ -642,6 +680,9 @@ extension RobotLink: CBCentralManagerDelegate {
     nonisolated func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
         MainActor.assumeIsolated {
             self.state = "Setting up"
+            self.hint = ""
+            self.discoverTry = 0
+            self.misses = 0
             p.discoverServices([RobotLink.uSvc])
         }
     }
@@ -683,15 +724,38 @@ extension RobotLink: CBPeripheralDelegate {
     nonisolated func peripheral(_ p: CBPeripheral, didDiscoverServices error: Error?) {
         MainActor.assumeIsolated {
             guard let s = p.services?.first(where: { $0.uuid == RobotLink.uSvc }) else {
-                // Rarely old firmware, whatever this used to say. macOS
-                // keeps the services it saw when the device was first
-                // paired, and the watch advertises as a mouse, so a Mac
-                // that met it as one can be holding a list with no panel
-                // service in it at all -- and will go on holding it
-                // through every update. Removing the device in Bluetooth
-                // settings and pairing again is what clears that.
-                self.state = "\(self.shortName) is paired but not answering the panel. "
-                           + "Remove it in System Settings > Bluetooth, then pair it again."
+                // Rarely old firmware, whatever this used to say. The
+                // watch is a real BLE mouse as well as a watch, so macOS
+                // connects it as one and keeps the list of services it
+                // saw at the time. A list without the panel's service in
+                // it is kept through every firmware update, and no
+                // amount of asking the same way will change it.
+                //
+                // So ask a different way each time, cheapest first,
+                // before troubling anyone about it.
+                self.sawServices = (p.services ?? []).map { $0.uuid.uuidString }
+                switch self.discoverTry {
+                case 0:
+                    // Unfiltered. A filtered discovery is answered from
+                    // the cache; asking for everything often is not.
+                    self.discoverTry = 1
+                    self.state = "Setting up"
+                    p.discoverServices(nil)
+                case 1:
+                    // A fresh link. Dropping the connection and taking
+                    // it again makes macOS discover rather than recall.
+                    self.discoverTry = 2
+                    self.state = "Reconnecting"
+                    self.central.cancelPeripheralConnection(p)
+                    self.pendingSince = Date()
+                    self.central.connect(p, options: nil)
+                default:
+                    // Out of ways to ask.
+                    self.state = "Not answering"
+                    self.hint = "\(self.shortName) is connected to this Mac but is not "
+                              + "answering the panel. In System Settings > Bluetooth, remove it, "
+                              + "then pair it again."
+                }
                 return
             }
             p.discoverCharacteristics([RobotLink.uCmd, RobotLink.uTime, RobotLink.uStat,
@@ -718,8 +782,11 @@ extension RobotLink: CBPeripheralDelegate {
             UserDefaults.standard.set(self.full, forKey: "bleFull")
             self.staleHint = false
             if self.cmdChr != nil && self.statChr != nil { self.ready(); Features.shared.linked() }
-            else { self.state = "\(self.shortName) answered without the channels the panel needs. "
-                              + "Update its firmware." }
+            else {
+                self.state = "Needs an update"
+                self.hint = "\(self.shortName) answered, but without the channels the panel "
+                          + "needs. Update its firmware."
+            }
         }
     }
 
@@ -766,5 +833,15 @@ extension RobotLink: CBPeripheralDelegate {
         guard let error else { return }
         let msg = error.localizedDescription
         MainActor.assumeIsolated { self.state = "Not sent: \(msg)" }
+    }
+}
+
+extension String {
+    /// For a name at the start of a sentence: \"the robot\" reads wrong
+    /// there, \"Zuno\" is already right, and neither should be touched
+    /// beyond the first letter.
+    var capitalizedFirst: String {
+        guard let f = first else { return self }
+        return String(f).uppercased() + dropFirst()
     }
 }
