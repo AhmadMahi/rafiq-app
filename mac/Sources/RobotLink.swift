@@ -182,6 +182,24 @@ final class RobotLink: NSObject, ObservableObject {
     /// services: macOS is holding an old list. Settings shows what to do.
     @Published private(set) var staleHint = false
     private var poll: Timer?
+    /// Runs while there is no link, so looking is something that keeps
+    /// happening rather than something tried once at launch.
+    private var sweep: Timer?
+    /// When the current connect was asked for. CoreBluetooth never
+    /// gives up on one by itself, so this is how we do.
+    private var pendingSince: Date?
+    /// Whether a scan is running, so repeated looks do not keep
+    /// restarting it out from under itself.
+    private var scanning = false
+
+    /// Every device this Mac has met, by name. A watch that macOS is
+    /// holding is not advertising, so a scan cannot hear it and a fresh
+    /// launch would show an empty list -- but macOS will still hand
+    /// over the peripheral if asked for it by identifier.
+    private var knownIds: [String: String] {
+        get { UserDefaults.standard.dictionary(forKey: "bleKnown") as? [String: String] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: "bleKnown") }
+    }
 
     /// The robot this Mac belongs to, once one has been found. Kept so
     /// a second Rafiq in the room is never picked up by mistake.
@@ -362,9 +380,11 @@ final class RobotLink: NSObject, ObservableObject {
         if let p = peripheral { central.cancelPeripheralConnection(p) }
         peripheral = nil
         savedId = nil
+        pendingSince = nil
         connected = false
         stat = [:]
         name = ""
+        found = []
         find()
     }
 
@@ -372,40 +392,134 @@ final class RobotLink: NSObject, ObservableObject {
     //  finding and keeping the robot
     // ---------------------------------------------------------------
 
+    /// Look by every route CoreBluetooth offers, and keep looking.
+    /// Three routes, because each covers a case the others cannot:
+    ///
+    ///  * `retrievePeripherals` knows the one this Mac has had before.
+    ///  * `retrieveConnectedPeripherals` knows one macOS is holding
+    ///    itself. The watch advertises an appearance and the HID UUID
+    ///    so that it is listed in Bluetooth settings at all, and macOS
+    ///    duly connects it as a mouse -- after which it stops
+    ///    advertising, and no amount of scanning will ever see it.
+    ///  * the scan knows anything new.
+    ///
+    /// The scan now runs beside the other two instead of only when they
+    /// come up empty. Stopping it the moment a remembered device was
+    /// attached is what wedged the panel: a connect that is still
+    /// pending holds the peripheral, the scan is off, and a watch
+    /// sitting in plain sight is never offered.
     private func find() {
         guard central.state == .poweredOn else { return }
-        // The one we know, if macOS still has it.
-        if let id = savedId, let p = central.retrievePeripherals(withIdentifiers: [id]).first {
-            attach(p)
-            return
+
+        // What macOS is already holding, which a scan can never show.
+        let held = central.retrieveConnectedPeripherals(withServices: [RobotLink.uSvc, RobotLink.uHid])
+        for p in held { note(p) }
+        // And the ones it has met before, for the same reason.
+        let ids = knownIds.values.compactMap(UUID.init(uuidString:))
+        if !ids.isEmpty { for p in central.retrievePeripherals(withIdentifiers: ids) { note(p) } }
+
+        if peripheral == nil {
+            // The one we know, unless the panel has been pointed
+            // somewhere else since: a remembered Rafiq must not take the
+            // link when a Zuno is the one being asked for.
+            if let id = savedId, let p = central.retrievePeripherals(withIdentifiers: [id]).first,
+               prefer.isEmpty || p.name == prefer {
+                attach(p)
+            } else if let p = held.first(where: { RobotLink.ours($0.name ?? "") && wanted($0.name ?? "") }) {
+                attach(p)
+            } else {
+                state = prefer.isEmpty ? "Looking for your robot. Touch it to wake it."
+                                       : "Looking for \(prefer). Touch it to wake it."
+            }
         }
-        // One macOS is already holding (the robot advertises HID).
-        if let p = central.retrieveConnectedPeripherals(withServices: [RobotLink.uSvc, RobotLink.uHid])
-            .first(where: { RobotLink.ours($0.name ?? "") && wanted($0.name ?? "") }) {
-            attach(p)
-            return
+
+        guard !connected else { return }
+        if !scanning {
+            central.scanForPeripherals(withServices: nil, options: nil)
+            scanning = true
         }
-        state = prefer.isEmpty ? "Looking for your robot. Touch it to wake it."
-                               : "Looking for \(prefer). Touch it to wake it."
+        startSweep()
+    }
+
+    /// Remember a device that could be offered, wherever it came from.
+    /// The Add Device list is built from this, so one macOS is holding
+    /// has to land here too or there is no way to add it.
+    /// `advertised` is for the scan, where the name arrives in the scan
+    /// response and is the only place it is to be had before connecting.
+    private func note(_ p: CBPeripheral, as advertised: String? = nil) {
+        let n = advertised ?? p.name ?? ""
+        guard RobotLink.ours(n) else { return }
+        if knownIds[n] != p.identifier.uuidString {
+            var k = knownIds; k[n] = p.identifier.uuidString; knownIds = k
+        }
+        if !found.contains(where: { $0.id == p.identifier }) {
+            found.append(Seen(id: p.identifier, name: n))
+        }
+    }
+
+    /// Start over: what is on the list may be gone, and what is missing
+    /// may have turned up since. The Add Device pane offers this,
+    /// because a pane that can only wait is no use when the waiting is
+    /// what is broken.
+    func rescan() {
         found = []
-        central.scanForPeripherals(withServices: nil, options: nil)
+        find()
+    }
+
+    private func stopScanning() {
+        guard scanning else { return }
+        central.stopScan()
+        scanning = false
+    }
+
+    /// While there is no link, look again every few seconds. macOS can
+    /// connect the watch as a mouse long after the panel started, and a
+    /// connect that never completes has to be given up on rather than
+    /// waited on for the rest of the session.
+    private func startSweep() {
+        guard sweep == nil else { return }
+        let me = self                        // a constant: see Gestures for why
+        sweep = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
+            Task { @MainActor in me.resweep() }
+        }
+    }
+
+    private func resweep() {
+        if connected { sweep?.invalidate(); sweep = nil; return }
+        // A connect that never completes -- a robot left at the office,
+        // one removed in Bluetooth settings, one that was replaced --
+        // used to hold the panel for the rest of the session, because
+        // CoreBluetooth is happy to keep a connect pending for ever.
+        // Give it up and ask again. Which one we are after is kept, so
+        // this is a retry rather than a change of mind.
+        if let p = peripheral, let since = pendingSince, Date().timeIntervalSince(since) > 12 {
+            central.cancelPeripheralConnection(p)
+            peripheral = nil
+            pendingSince = nil
+        }
+        find()
     }
 
     private func attach(_ p: CBPeripheral) {
-        central.stopScan()
         peripheral = p
         p.delegate = self
         savedId = p.identifier
         name = p.name ?? "Robot"
         state = "Connecting to \(name)"
-        // A pending connect never times out: macOS completes it whenever
-        // the robot is next in range, which is exactly what is wanted.
+        // macOS completes a pending connect whenever the robot is next
+        // in range, which is what is wanted -- but only for a while.
+        // `resweep` gives up after twelve seconds and asks again, so a
+        // device that is not coming back cannot hold the panel.
+        pendingSince = Date()
         central.connect(p, options: nil)
     }
 
     private func ready() {
         guard let p = peripheral else { return }
         connected = true
+        stopScanning()
+        sweep?.invalidate(); sweep = nil
+        pendingSince = nil
         state = "Connected"
         if let t = timeChr { p.writeValue(Self.clock(), for: t, type: .withResponse) }
         if let c = cmdChr {
@@ -430,8 +544,9 @@ final class RobotLink: NSObject, ObservableObject {
         evtChr = nil; ptrChr = nil; cfgChr = nil
         poll?.invalidate(); poll = nil
         cmdChr = nil; timeChr = nil; statChr = nil
-        state = "Waiting for Rafiq"
-        if let p = peripheral { central.connect(p, options: nil) }   // back when it is
+        state = name.isEmpty ? "Waiting for the robot" : "Waiting for \(name)"
+        if let p = peripheral { pendingSince = Date(); central.connect(p, options: nil) }
+        find()          // and keep looking meanwhile, in case it is not coming back
     }
 
     // ---------------------------------------------------------------
@@ -504,7 +619,7 @@ extension RobotLink: CBCentralManagerDelegate {
             switch st {
             case .poweredOn:    self.find()
             case .poweredOff:   self.state = "Bluetooth is off"; self.connected = false
-            case .unauthorized: self.state = "Allow Bluetooth for Rafiq in System Settings"
+            case .unauthorized: self.state = "Allow Bluetooth in System Settings > Privacy & Security"
             case .unsupported:  self.state = "This Mac has no Bluetooth LE"
             default:            self.state = "Starting Bluetooth"
             }
@@ -518,9 +633,7 @@ extension RobotLink: CBCentralManagerDelegate {
         MainActor.assumeIsolated {
             // Remember it either way, so the Settings pane can show what
             // is around even while we are busy with one of them.
-            if !self.found.contains(where: { $0.id == p.identifier }) {
-                self.found.append(Seen(id: p.identifier, name: n))
-            }
+            self.note(p, as: n)
             guard self.peripheral == nil, self.wanted(n) else { return }
             self.attach(p)
         }
@@ -570,7 +683,15 @@ extension RobotLink: CBPeripheralDelegate {
     nonisolated func peripheral(_ p: CBPeripheral, didDiscoverServices error: Error?) {
         MainActor.assumeIsolated {
             guard let s = p.services?.first(where: { $0.uuid == RobotLink.uSvc }) else {
-                self.state = "Rafiq needs firmware 7.2 or newer"
+                // Rarely old firmware, whatever this used to say. macOS
+                // keeps the services it saw when the device was first
+                // paired, and the watch advertises as a mouse, so a Mac
+                // that met it as one can be holding a list with no panel
+                // service in it at all -- and will go on holding it
+                // through every update. Removing the device in Bluetooth
+                // settings and pairing again is what clears that.
+                self.state = "\(self.shortName) is paired but not answering the panel. "
+                           + "Remove it in System Settings > Bluetooth, then pair it again."
                 return
             }
             p.discoverCharacteristics([RobotLink.uCmd, RobotLink.uTime, RobotLink.uStat,
@@ -597,7 +718,8 @@ extension RobotLink: CBPeripheralDelegate {
             UserDefaults.standard.set(self.full, forKey: "bleFull")
             self.staleHint = false
             if self.cmdChr != nil && self.statChr != nil { self.ready(); Features.shared.linked() }
-            else { self.state = "Rafiq needs firmware 7.2 or newer" }
+            else { self.state = "\(self.shortName) answered without the channels the panel needs. "
+                              + "Update its firmware." }
         }
     }
 

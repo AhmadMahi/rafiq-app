@@ -70,6 +70,10 @@ struct AddDevice: View {
     @ObservedObject private var reg = Devices.shared
     @State private var naming: String? = nil
     @State private var label = ""
+    /// True once looking has gone on long enough to be worth
+    /// explaining. Said straight away it reads as an error; said after
+    /// ten seconds of nothing it reads as help.
+    @State private var patient = false
     var done: () -> Void
 
     var body: some View {
@@ -107,6 +111,22 @@ struct AddDevice: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 18)
                 ProgressView().controlSize(.small).padding(.top, 2)
+                // A watch that is already connected in Bluetooth
+                // settings has stopped advertising, so there is nothing
+                // for a scan to hear. The panel asks macOS for what it
+                // is holding as well, which takes a moment longer than
+                // a scan does -- and if that still comes up empty, the
+                // way through is to unpair, not to keep waiting.
+                if patient {
+                    Text("Already connected in System Settings > Bluetooth? "
+                         + "Remove it there, then touch the device and look again.")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 18).padding(.top, 2)
+                }
+                Button("Look again") { link.rescan() }
+                    .font(.system(size: 11)).buttonStyle(.link).padding(.top, 1)
             } else {
                 Text("Pick the one you want to add.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -138,5 +158,9 @@ struct AddDevice: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 16)
+        .task {
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            patient = true
+        }
     }
 }
