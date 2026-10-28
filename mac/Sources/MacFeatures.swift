@@ -27,6 +27,7 @@ final class Features: NSObject, ObservableObject {
     @Published var knob       = flag("fKnob", false)  { didSet { save("fKnob", knob); push(); screen("vol", knob) } }
     @Published var shot       = flag("fShot", true)   { didSet { save("fShot", shot) } }
     @Published var work       = flag("fWork", false)  { didSet { save("fWork", work); screen("work", work) } }
+    @Published var bright     = flag("fBright", false) { didSet { save("fBright", bright); screen("bright", bright) } }
     @Published var health     = flag("fHealth", true) { didSet { save("fHealth", health); lastHealth = ""; tickHealth(); screen("health", health) } }
     @Published var dimTyping  = flag("fDim", false)   { didSet { save("fDim", dimTyping); if !dimTyping { setDim(false) } } }
     @Published var prayPause  = flag("fPray", true)   { didSet { save("fPray", prayPause) } }
@@ -131,6 +132,21 @@ final class Features: NSObject, ObservableObject {
         guard link.full, link.macMode else { return }
         link.send("!scr \(name) \(on ? 1 : 0)")
         if on, name == "vol" { sendVolume() }
+        if on, name == "bright" { sendBright() }
+        // The clicker and the brightness keys are keystrokes, and
+        // without Accessibility they go nowhere at all and say nothing
+        // about it. Tell the watch, so its screen can.
+        if on, name == "click" || name == "bright" { sendAx() }
+    }
+
+    /// Whether this Mac can send a keystroke, as the watch needs to
+    /// know it. Asked for the first time one is needed rather than at
+    /// launch, so nobody is prompted for a permission they may never
+    /// use.
+    func sendAx() {
+        let ok = Keys.trusted
+        link.send("!ax \(ok ? 1 : 0)")
+        if !ok { Keys.ask() }
     }
 
     /// Everything off but the link itself. Connecting a Mac should not
@@ -139,7 +155,8 @@ final class Features: NSObject, ObservableObject {
     func clearForMac() {
         meetMute = false; clicker = false; knob = false; work = false
         health = false; reminders = false; dimTyping = false; shot = false
-        for n in ["click", "meet", "vol", "work", "health"] { link.send("!scr \(n) 0") }
+        bright = false
+        for n in ["click", "meet", "vol", "bright", "work", "health"] { link.send("!scr \(n) 0") }
     }
 
     func sendVolume() {
@@ -148,8 +165,22 @@ final class Features: NSObject, ObservableObject {
     }
     private func stepVolume(_ dir: Int) {
         guard let v = OutVol.get() else { return }
+        // Unmute first. Stepping the level of a muted output moves a
+        // number and changes nothing anyone can hear, which looks
+        // exactly like a broken volume control.
+        if OutVol.muted() { OutVol.setMuted(false) }
         OutVol.set(min(1, max(0, v + Float(dir) * 0.06)))
         sendVolume()
+    }
+
+    func sendBright() { link.send("!bri \(Bright.percent())") }
+    private func stepBright(_ dir: Int) {
+        Bright.step(dir)
+        // The key takes a moment to land before the new level reads back.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            self?.sendBright()
+        }
     }
 
     private var awake = true
@@ -203,6 +234,8 @@ final class Features: NSObject, ObservableObject {
         case "pv": _ = Keys.press("left");  return true
         case "v+": stepVolume(+1); return true
         case "v-": stepVolume(-1); return true
+        case "b+": stepBright(+1); return true
+        case "b-": stepBright(-1); return true
         case "mt": toggleMute(); return true
         default: break
         }
@@ -765,5 +798,44 @@ enum MacHealth {
         let v = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         guard let b = v?.volumeAvailableCapacityForImportantUsage else { return nil }
         return Int(b / 1_000_000_000)
+    }
+}
+
+/// The screen's brightness.
+///
+/// There is no public API for this. The brightness keys on the keyboard
+/// go through DisplayServices, so that is what this uses, looked up at
+/// runtime so a macOS that has moved it cannot stop the app launching.
+/// IODisplay's brightness parameter is the documented one and does not
+/// work on Apple silicon's built-in display at all, which is the only
+/// screen this is ever asked about.
+///
+/// Measured on the Mac this was written on: both symbols resolve and
+/// the main display reads back a sensible level.
+enum Bright {
+    private static let handle: UnsafeMutableRawPointer? =
+        dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_NOW)
+    private typealias Getter = @convention(c) (UInt32, UnsafeMutablePointer<Float>) -> Int32
+    private typealias Setter = @convention(c) (UInt32, Float) -> Int32
+    private static let getter: Getter? = handle
+        .flatMap { dlsym($0, "DisplayServicesGetBrightness") }
+        .map { unsafeBitCast($0, to: Getter.self) }
+    private static let setter: Setter? = handle
+        .flatMap { dlsym($0, "DisplayServicesSetBrightness") }
+        .map { unsafeBitCast($0, to: Setter.self) }
+
+    static var available: Bool { getter != nil && setter != nil }
+
+    /// 0 to 100, or -1 when this Mac will not say.
+    static func percent() -> Int {
+        guard let g = getter else { return -1 }
+        var v: Float = -1
+        return g(CGMainDisplayID(), &v) == 0 && v >= 0 ? Int((v * 100).rounded()) : -1
+    }
+    static func step(_ dir: Int) {
+        guard let g = getter, let s = setter else { return }
+        var v: Float = 0
+        guard g(CGMainDisplayID(), &v) == 0 else { return }
+        _ = s(CGMainDisplayID(), min(1, max(0, v + Float(dir) * 0.0625)))
     }
 }

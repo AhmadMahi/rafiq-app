@@ -426,6 +426,10 @@ struct Panel: View {
                  detail: fx.knob ? "tap to change" : "off", on: fx.knob) {
                 fx.knob.toggle()
             }
+            Tile(icon: "sun.max", name: "Brightness",
+                 detail: fx.bright ? "tap to change" : "off", on: fx.bright) {
+                fx.bright.toggle()
+            }
             Tile(icon: "timer", name: "Work timer",
                  detail: link.timerLeft > 0
                        ? String(format: "%d:%02d", link.timerLeft / 60, link.timerLeft % 60)
