@@ -400,10 +400,20 @@ struct Panel: View {
     /// watch has no screen and no pad for is a tile that promises
     /// something it cannot show you.
     ///
+    /// The ones that own a screen are also what the watch's ring is
+    /// made of: a pad from the clock opens it, and whatever is switched
+    /// on here is a slot in it, in this order. So the order of these
+    /// tiles is the order of the ring, and the panel reads the same way
+    /// round as the thing on your wrist.
+    ///
     /// Everything starts off. `setMacMode` clears them, because which
     /// ones a session needs is not the same from one session to the
     /// next, and the only thing on when a Mac connects should be the
     /// connection.
+    /// "on the ring" only where there is one: firmware before 2.3.0 has
+    /// a carousel instead, and says which it is in its caps.
+    private var ringWord: String { link.can("ring") ? "on the ring" : "on the watch" }
+
     private var zunoGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4),
                   spacing: 6) {
@@ -414,13 +424,13 @@ struct Panel: View {
             }
 
             // --- the four that take over the watch's screen ---
-            Tile(icon: "mic.slash", name: "Meeting",
-                 detail: fx.meetMute ? "on the watch" : "off", on: fx.meetMute) {
-                fx.meetMute.toggle()
-            }
             Tile(icon: "chevron.right.2", name: "Clicker",
                  detail: fx.clicker ? "tap to move" : "off", on: fx.clicker) {
                 fx.clicker.toggle()
+            }
+            Tile(icon: "mic.slash", name: "Meeting",
+                 detail: fx.meetMute ? ringWord : "off", on: fx.meetMute) {
+                fx.meetMute.toggle()
             }
             Tile(icon: "dial.medium", name: "Volume",
                  detail: fx.knob ? "tap to change" : "off", on: fx.knob) {
@@ -433,14 +443,14 @@ struct Panel: View {
             Tile(icon: "timer", name: "Work timer",
                  detail: link.timerLeft > 0
                        ? String(format: "%d:%02d", link.timerLeft / 60, link.timerLeft % 60)
-                       : (fx.work ? "on the watch" : "off"),
+                       : (fx.work ? ringWord : "off"),
                  on: fx.work || link.timerLeft > 0) {
                 fx.work.toggle()
                 if fx.work { showFocus = true; closeOthers(except: .focus) }
                 else if link.timerLeft > 0 { dev.stopTimer() }
             }
             Tile(icon: "heart.text.square", name: "Mac health",
-                 detail: fx.health ? "on the watch" : "off", on: fx.health) {
+                 detail: fx.health ? ringWord : "off", on: fx.health) {
                 fx.health.toggle()
             }
 
