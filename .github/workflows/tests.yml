@@ -1,0 +1,24 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The link suite pulls find/attach/resweep straight out of
+      # Sources/RobotLink.swift and compiles them against a fake
+      # CoreBluetooth, so what runs here is the code that ships, not a
+      # copy of it. No hardware, no Bluetooth, no screen.
+      #
+      # panelcheck.sh is deliberately not run: it builds the app and
+      # drives AppKit off screen, which needs a window server the runner
+      # does not have. ./mac/tests/run.sh --panels is the local command.
+      - name: Run the suites
+        run: mac/tests/run.sh
